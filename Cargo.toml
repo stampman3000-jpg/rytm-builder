@@ -1,0 +1,12 @@
+[package]
+name = "rytm-builder"
+version = "0.1.0"
+edition = "2021"
+description = "Compose a fresh Analog Rytm whole-project .syx from a dump library (builder, not editor)."
+license = "MIT"
+
+[dependencies]
+# rytm-sys pulls an unbound `home`; 0.5.12 needs edition2024 / newer rustc.
+home = "=0.5.9"
+md5 = "0.7"
+rytm-sys = "0.1.5"
