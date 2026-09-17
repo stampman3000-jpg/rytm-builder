@@ -2,13 +2,29 @@ use crate::layout::*;
 use crate::project::{
     count_pattern_trigs, kit_sample_nrs, pattern_kit_number, sample_slots_used, Project,
 };
+use std::io::{self, Write};
+
+fn out(line: impl std::fmt::Display) -> bool {
+    writeln!(io::stdout(), "{line}").is_ok()
+}
 
 pub fn print_catalog(project: &Project) {
-    println!("FILE {}", project.path);
-    println!("MSGS {}", project.objects.len());
-    println!("SAMPLE_SLOTS_USED {}/128", sample_slots_used(project));
+    if !out(format!("FILE {}", project.path)) {
+        return;
+    }
+    if !out(format!("MSGS {}", project.objects.len())) {
+        return;
+    }
+    if !out(format!(
+        "SAMPLE_SLOTS_USED {}/128",
+        sample_slots_used(project)
+    )) {
+        return;
+    }
 
-    println!("--- patterns ---");
+    if !out("--- patterns ---") {
+        return;
+    }
     let mut nonempty = 0u32;
     for nr in 0..128u8 {
         let Some(p) = project
@@ -40,14 +56,20 @@ pub fn print_catalog(project: &Project) {
         } else {
             format!("{kn} '{kname}'")
         };
-        println!(
+        if !out(format!(
             "  {} idx={nr:3} kit={kit_s} trigs={trigs}",
             pattern_label(nr)
-        );
+        )) {
+            return;
+        }
     }
-    println!("NONEMPTY_PATTERNS {nonempty}");
+    if !out(format!("NONEMPTY_PATTERNS {nonempty}")) {
+        return;
+    }
 
-    println!("--- kits with names or sample refs ---");
+    if !out("--- kits with names or sample refs ---") {
+        return;
+    }
     for nr in 0..128u8 {
         let Some(k) = project
             .objects
@@ -65,6 +87,8 @@ pub fn print_catalog(project: &Project) {
         if name.is_empty() && samples.is_empty() {
             continue;
         }
-        println!("  kit {nr:3} '{name}' sample_nrs={samples:?}");
+        if !out(format!("  kit {nr:3} '{name}' sample_nrs={samples:?}")) {
+            return;
+        }
     }
 }

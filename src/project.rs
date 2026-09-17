@@ -229,14 +229,14 @@ pub fn write_settings_first(project: &Project, path: &Path) -> Result<ExportChec
     Ok(check)
 }
 
-pub fn find_raw<'a>(project: &'a Project, obj_type: u8, nr: u8) -> Option<&'a Object> {
+pub fn find_raw(project: &Project, obj_type: u8, nr: u8) -> Option<&Object> {
     project
         .objects
         .iter()
         .find(|o| o.obj_type == obj_type && o.obj_nr == u16::from(nr))
 }
 
-pub fn find_raw_mut<'a>(project: &'a mut Project, obj_type: u8, nr: u8) -> Option<&'a mut Object> {
+pub fn find_raw_mut(project: &mut Project, obj_type: u8, nr: u8) -> Option<&mut Object> {
     project
         .objects
         .iter_mut()

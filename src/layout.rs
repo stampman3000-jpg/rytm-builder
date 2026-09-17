@@ -93,7 +93,7 @@ pub fn parse_pattern_index(s: &str) -> Result<u8, String> {
 }
 
 pub fn pattern_label(idx: u8) -> String {
-    let bank = (idx / 16) as u8;
+    let bank = idx / 16;
     let slot = (idx % 16) + 1;
     format!("{}{:02}", (b'A' + bank) as char, slot)
 }
