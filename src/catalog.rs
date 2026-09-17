@@ -1,6 +1,7 @@
 use crate::layout::*;
 use crate::project::{
-    count_pattern_trigs, kit_sample_nrs, pattern_kit_number, sample_slots_used, Project,
+    count_pattern_trigs, count_smp_nr_plock_values, kit_sample_nrs, pattern_kit_number,
+    sample_slots_used, Project,
 };
 use std::io::{self, Write};
 
@@ -56,8 +57,9 @@ pub fn print_catalog(project: &Project) {
         } else {
             format!("{kn} '{kname}'")
         };
+        let plocks = count_smp_nr_plock_values(&p.raw);
         if !out(format!(
-            "  {} idx={nr:3} kit={kit_s} trigs={trigs}",
+            "  {} idx={nr:3} kit={kit_s} trigs={trigs} smp_nr_plocks={plocks}",
             pattern_label(nr)
         )) {
             return;

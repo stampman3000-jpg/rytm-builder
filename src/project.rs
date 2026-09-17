@@ -276,6 +276,27 @@ pub fn kit_sample_nrs(raw: &[u8]) -> Vec<(usize, u8)> {
     out
 }
 
+/// Count SMP_NR plock *values* in 1..=127 (same rewrite sites compose remaps).
+pub fn count_smp_nr_plock_values(pattern: &[u8]) -> u32 {
+    let mut n = 0u32;
+    for i in 0..NUM_PLOCK_SEQS {
+        let off = PLOCK_SEQS + i * PLOCK_SEQ_SZ;
+        if off + PLOCK_SEQ_SZ > pattern.len() {
+            break;
+        }
+        if pattern[off] != PLOCK_TYPE_SMP_NR {
+            continue;
+        }
+        for b in 0..64 {
+            let v = pattern[off + 2 + b];
+            if (1..=127).contains(&v) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
