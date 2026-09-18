@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,9 +24,23 @@ function destLabel(i: number): string {
 }
 
 function kindBadge(kind: DumpInfo["kind"]) {
-  if (kind === "template") return <Badge variant="secondary">empty template</Badge>;
-  if (kind === "composed") return <Badge variant="outline">composed</Badge>;
-  return <Badge>library</Badge>;
+  if (kind === "template") {
+    return (
+      <Badge variant="secondary" className="rounded-sm tracking-wide">
+        empty template
+      </Badge>
+    );
+  }
+  if (kind === "composed") {
+    return (
+      <Badge variant="outline" className="rounded-sm tracking-wide">
+        composed
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="rounded-sm tracking-wide">library</Badge>
+  );
 }
 
 export function BuilderApp() {
@@ -45,6 +60,9 @@ export function BuilderApp() {
   const [composing, setComposing] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
   const [composeReport, setComposeReport] = useState<string | null>(null);
+  const pickSeq = useRef(0);
+  const dragFrom = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
 
   const loadDumps = useCallback(async () => {
     setLoadingList(true);
@@ -100,27 +118,54 @@ export function BuilderApp() {
     };
   }, [selected]);
 
+  const queuedCount = (dumpPath: string, label: string) =>
+    picks.filter((p) => p.dumpPath === dumpPath && p.pattern.label === label)
+      .length;
+
   const addPick = (pattern: NonNullable<Catalog>["patterns"][number]) => {
     if (!selected) return;
-    const id = `${selected.path}:${pattern.label}`;
-    setPicks((prev) => {
-      if (prev.some((p) => p.id === id)) return prev;
-      return [
-        ...prev,
-        {
-          id,
-          dumpPath: selected.path,
-          dumpName: selected.name.replace(/\.syx$/i, ""),
-          pattern,
-        },
-      ];
-    });
+    pickSeq.current += 1;
+    const id = `${selected.path}:${pattern.label}:${pickSeq.current}`;
+    setPicks((prev) => [
+      ...prev,
+      {
+        id,
+        dumpPath: selected.path,
+        dumpName: selected.name.replace(/\.syx$/i, ""),
+        pattern,
+      },
+    ]);
     setComposeReport(null);
     setComposeError(null);
   };
 
   const removePick = (id: string) => {
     setPicks((prev) => prev.filter((p) => p.id !== id));
+    setComposeReport(null);
+  };
+
+  const movePick = (index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    setPicks((prev) => {
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[index];
+      next[index] = next[j];
+      next[j] = tmp;
+      return next;
+    });
+    setComposeReport(null);
+  };
+
+  const reorderPick = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    setPicks((prev) => {
+      if (from >= prev.length || to >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
     setComposeReport(null);
   };
 
@@ -167,14 +212,14 @@ export function BuilderApp() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="border-b border-border px-4 py-4 md:px-6">
-        <p className="font-mono text-xs tracking-[0.2em] text-primary uppercase">
+      <header className="border-b border-border px-4 py-5 md:px-6">
+        <p className="font-mono text-[11px] tracking-[0.32em] text-primary uppercase">
           rytm-builder
         </p>
-        <h1 className="mt-1 text-xl font-medium md:text-2xl">
+        <h1 className="mt-2 font-heading text-2xl font-semibold tracking-tight md:text-[1.75rem]">
           Browse dumps. Pick patterns. Export a new project.
         </h1>
-        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
           This is a composer, not an editor. Originals stay untouched. The new
           file is settings-first so samples bind on the box. Restore into an
           empty or disposable Analog Rytm project; samples must already be on
@@ -183,9 +228,11 @@ export function BuilderApp() {
       </header>
 
       <div className="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3 md:p-6">
-        <Card className="min-h-[280px]">
+        <Card className="min-h-[280px] rounded-md">
           <CardHeader className="border-b">
-            <CardTitle>Source dumps</CardTitle>
+            <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
+              Source dumps
+            </CardTitle>
             <CardDescription className="font-mono text-xs break-all">
               {dumpsDir || "looking for dumps folder…"}
             </CardDescription>
@@ -212,7 +259,7 @@ export function BuilderApp() {
                       <button
                         type="button"
                         onClick={() => setSelected(d)}
-                        className={`flex w-full flex-col gap-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                        className={`flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left text-sm transition-colors ${
                           active
                             ? "bg-primary text-primary-foreground"
                             : "hover:bg-muted"
@@ -238,9 +285,9 @@ export function BuilderApp() {
           </CardContent>
         </Card>
 
-        <Card className="min-h-[280px]">
+        <Card className="min-h-[280px] rounded-md">
           <CardHeader className="border-b">
-            <CardTitle>
+            <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
               {selected ? selected.name.replace(/\.syx$/i, "") : "Patterns"}
             </CardTitle>
             <CardDescription>
@@ -272,12 +319,12 @@ export function BuilderApp() {
             <ScrollArea className="h-[min(52vh,420px)]">
               <ul className="flex flex-col gap-1 pr-2">
                 {catalog?.patterns.map((p) => {
-                  const id = selected ? `${selected.path}:${p.label}` : p.label;
-                  const already = picks.some((x) => x.id === id);
+                  const n =
+                    selected ? queuedCount(selected.path, p.label) : 0;
                   return (
                     <li
                       key={p.label}
-                      className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/60"
+                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-baseline gap-2">
@@ -299,15 +346,16 @@ export function BuilderApp() {
                           {p.smp_nr_plocks > 0
                             ? ` · ${p.smp_nr_plocks} SMP_NR plocks`
                             : ""}
+                          {n > 0 ? ` · queued ×${n}` : ""}
                         </p>
                       </div>
                       <Button
                         size="sm"
-                        variant={already ? "secondary" : "default"}
-                        disabled={already || p.kit === null}
+                        variant={n > 0 ? "secondary" : "default"}
+                        disabled={p.kit === null}
                         onClick={() => addPick(p)}
                       >
-                        {already ? "added" : "add"}
+                        {n > 0 ? "add again" : "add"}
                       </Button>
                     </li>
                   );
@@ -317,43 +365,107 @@ export function BuilderApp() {
           </CardContent>
         </Card>
 
-        <Card className="min-h-[280px]">
+        <Card className="min-h-[280px] rounded-md">
           <CardHeader className="border-b">
-            <CardTitle>Fresh project</CardTitle>
+            <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
+              Fresh project
+            </CardTitle>
             <CardDescription>
-              Lands in A01, A02, … in add order. Template{" "}
-              {template ? template.split("/").pop() : "missing"}. Never overwrites
-              an existing file.
+              Dest slots follow this list: A01, A02, … Shuffle with arrows or
+              drag. Same pattern from the same dump can appear more than once.
+              Template {template ? template.split("/").pop() : "missing"}.
+              Never overwrites an existing file.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-3 pt-3">
             {picks.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Nothing queued. Add patterns from one or more dumps.
+                Nothing queued. Add patterns from one or more dumps. Add the
+                same one twice if you want it in two dest slots.
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className="flex flex-col gap-1">
                 {picks.map((p, i) => (
                   <li
                     key={p.id}
-                    className="flex items-start justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2"
+                    draggable
+                    onDragStart={(e) => {
+                      const t = e.target as HTMLElement;
+                      if (t.closest("button")) {
+                        e.preventDefault();
+                        return;
+                      }
+                      dragFrom.current = i;
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOver(i);
+                    }}
+                    onDragLeave={() => {
+                      setDragOver((cur) => (cur === i ? null : cur));
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = dragFrom.current;
+                      if (from !== null) reorderPick(from, i);
+                      dragFrom.current = null;
+                      setDragOver(null);
+                    }}
+                    onDragEnd={() => {
+                      dragFrom.current = null;
+                      setDragOver(null);
+                    }}
+                    className={`flex items-start justify-between gap-2 rounded-md px-2 py-2 ${
+                      dragOver === i
+                        ? "bg-primary/15 ring-1 ring-primary/50"
+                        : "bg-muted/50"
+                    }`}
                   >
-                    <div>
-                      <p className="font-mono text-sm">
-                        {destLabel(i)} ← {p.dumpName} {p.pattern.label}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {p.pattern.kit_name || "unnamed"} ·{" "}
-                        {p.pattern.sample_refs} sample refs
-                      </p>
+                    <div className="flex min-w-0 items-start gap-1">
+                      <span
+                        className="mt-0.5 cursor-grab text-muted-foreground active:cursor-grabbing"
+                        title="Drag to reorder"
+                        aria-hidden
+                      >
+                        <GripVertical className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm">
+                          {destLabel(i)} ← {p.dumpName} {p.pattern.label}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.pattern.kit_name || "unnamed"} ·{" "}
+                          {p.pattern.sample_refs} sample refs
+                        </p>
+                      </div>
                     </div>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => removePick(p.id)}
-                    >
-                      remove
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={`Move ${destLabel(i)} up`}
+                        disabled={i === 0}
+                        onClick={() => movePick(i, -1)}
+                      >
+                        <ChevronUp />
+                      </Button>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={`Move ${destLabel(i)} down`}
+                        disabled={i === picks.length - 1}
+                        onClick={() => movePick(i, 1)}
+                      >
+                        <ChevronDown />
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => removePick(p.id)}
+                      >
+                        remove
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -366,13 +478,14 @@ export function BuilderApp() {
             <label className="text-sm">
               New file name
               <Input
-                className="mt-1 font-mono"
+                className="mt-1 rounded-md font-mono"
                 value={outName}
                 onChange={(e) => setOutName(e.target.value)}
                 placeholder="Fresh_from_picks"
               />
             </label>
             <Button
+              className="rounded-md"
               onClick={() => void exportFresh()}
               disabled={composing || picks.length === 0}
             >

@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — catalog dumps, pick patterns, export a new `.syx` through this same CLI. Restore model unchanged: disposable RAM project, delete if bad.
+Local app at http://127.0.0.1:43147 — catalog dumps, pick patterns, shuffle the Fresh Project queue, export a new `.syx` through this same CLI. Dest slots follow queue order. Restore model unchanged: disposable RAM project, delete if bad.
 
 ## Catalog a dump
 

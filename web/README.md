@@ -1,6 +1,6 @@
 # rytm-builder web
 
-Local browse UI for Analog Rytm whole-project `.syx` dumps. It catalogs patterns and kits, then calls the `rytm-builder` CLI to export a **new** settings-first project. It does not edit dumps in place and does not talk to the device.
+Local browse UI for Analog Rytm whole-project `.syx` dumps. It catalogs patterns and kits, then calls the `rytm-builder` CLI to export a **new** settings-first project. Dest slots follow Fresh Project list order (shuffle before export; same pattern can be queued more than once). It does not edit dumps in place and does not talk to the device.
 
 ## Run
 
