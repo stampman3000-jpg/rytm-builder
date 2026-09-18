@@ -213,7 +213,7 @@ export function BuilderApp() {
   return (
     <div className="flex min-h-full flex-col">
       <header className="border-b border-border px-4 py-5 md:px-6">
-        <p className="font-mono text-[11px] tracking-[0.32em] text-primary uppercase">
+        <p className="font-sans text-[11px] tracking-[0.32em] text-primary uppercase">
           rytm-builder
         </p>
         <h1 className="mt-2 font-heading text-2xl font-semibold tracking-tight md:text-[1.75rem]">
@@ -233,7 +233,7 @@ export function BuilderApp() {
             <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
               Source dumps
             </CardTitle>
-            <CardDescription className="font-mono text-xs break-all">
+            <CardDescription className="font-sans text-xs break-all">
               {dumpsDir || "looking for dumps folder…"}
             </CardDescription>
           </CardHeader>
@@ -270,7 +270,7 @@ export function BuilderApp() {
                           {kindBadge(d.kind)}
                         </span>
                         <span
-                          className={`font-mono text-xs ${
+                          className={`font-sans text-xs ${
                             active ? "opacity-80" : "text-muted-foreground"
                           }`}
                         >
@@ -327,9 +327,9 @@ export function BuilderApp() {
                       className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
                     >
                       <div className="min-w-0">
-                        <div className="flex flex-wrap items-baseline gap-2">
+                        <div className="flex flex-wrap items-baseline gap-2 font-sans">
                           <span className="font-mono font-medium">{p.label}</span>
-                          <span className="truncate">
+                          <span className="truncate font-sans">
                             {p.kit_name || "unnamed kit"}
                             {p.kit !== null ? (
                               <span className="text-muted-foreground">
@@ -341,7 +341,7 @@ export function BuilderApp() {
                             )}
                           </span>
                         </div>
-                        <p className="font-mono text-xs text-muted-foreground">
+                        <p className="font-sans text-xs text-muted-foreground">
                           {p.trigs} trigs · {p.sample_refs} sample refs
                           {p.smp_nr_plocks > 0
                             ? ` · ${p.smp_nr_plocks} SMP_NR plocks`
@@ -430,10 +430,15 @@ export function BuilderApp() {
                         <GripVertical className="size-4" />
                       </span>
                       <div className="min-w-0">
-                        <p className="font-mono text-sm">
-                          {destLabel(i)} ← {p.dumpName} {p.pattern.label}
+                        <p className="font-sans text-sm">
+                          <span className="font-mono">{destLabel(i)}</span>
+                          <span>
+                            {" "}
+                            ← {p.dumpName}{" "}
+                          </span>
+                          <span className="font-mono">{p.pattern.label}</span>
                         </p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="font-sans text-xs text-muted-foreground">
                           {p.pattern.kit_name || "unnamed"} ·{" "}
                           {p.pattern.sample_refs} sample refs
                         </p>
@@ -478,7 +483,7 @@ export function BuilderApp() {
             <label className="text-sm">
               New file name
               <Input
-                className="mt-1 rounded-md font-mono"
+                className="mt-1 rounded-md font-sans"
                 value={outName}
                 onChange={(e) => setOutName(e.target.value)}
                 placeholder="Fresh_from_picks"
@@ -497,7 +502,7 @@ export function BuilderApp() {
             {composeReport && (
               <Textarea
                 readOnly
-                className="min-h-40 font-mono text-xs"
+                className="min-h-40 font-sans text-xs"
                 value={composeReport}
               />
             )}
