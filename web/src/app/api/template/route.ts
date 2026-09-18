@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import {
-  activeTemplate,
   bakedTemplatePath,
+  catalogDestTemplate,
+  emptyDestCatalog,
   ensureAppDirs,
   safeSyxName,
+  userTemplateLabelPath,
   userTemplatePath,
 } from "@/lib/rytm";
 
@@ -13,8 +15,8 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const t = activeTemplate();
-    return NextResponse.json({ kind: t.kind, name: t.name });
+    const result = await catalogDestTemplate();
+    return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "template missing" },
@@ -31,7 +33,7 @@ export async function POST(req: Request) {
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "drop a .syx dest base" }, { status: 400 });
     }
-    safeSyxName(file.name);
+    const name = safeSyxName(file.name);
     const buf = Buffer.from(await file.arrayBuffer());
     if (buf.length < 1000) {
       return NextResponse.json(
@@ -40,7 +42,9 @@ export async function POST(req: Request) {
       );
     }
     fs.writeFileSync(userTemplatePath(), buf);
-    return NextResponse.json({ kind: "custom", name: "Dropped dest base" });
+    fs.writeFileSync(userTemplateLabelPath(), name);
+    const result = await catalogDestTemplate();
+    return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "template import failed" },
@@ -52,11 +56,17 @@ export async function POST(req: Request) {
 export async function DELETE() {
   try {
     const custom = userTemplatePath();
+    const label = userTemplateLabelPath();
     if (fs.existsSync(custom)) fs.unlinkSync(custom);
+    if (fs.existsSync(label)) fs.unlinkSync(label);
     if (!fs.existsSync(bakedTemplatePath())) {
       return NextResponse.json({ error: "baked template missing" }, { status: 500 });
     }
-    return NextResponse.json({ kind: "baked", name: "Baked empty" });
+    return NextResponse.json({
+      kind: "baked",
+      name: "Baked empty",
+      catalog: emptyDestCatalog(),
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "reset failed" },

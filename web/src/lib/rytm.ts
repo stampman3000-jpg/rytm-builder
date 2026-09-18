@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import type { Catalog } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +36,10 @@ export function userTemplatePath(): string {
   return path.join(appHome(), "template-override.syx");
 }
 
+export function userTemplateLabelPath(): string {
+  return path.join(appHome(), "template-override-name.txt");
+}
+
 export function bakedTemplatePath(): string {
   return path.join(repoRoot(), "web", "templates", "Untitled-4.syx");
 }
@@ -47,13 +52,48 @@ export function ensureAppDirs(): void {
 export function activeTemplate(): { kind: "baked" | "custom"; path: string; name: string } {
   const custom = userTemplatePath();
   if (fs.existsSync(custom)) {
-    return { kind: "custom", path: custom, name: "Dropped dest base" };
+    let name = "Dropped dest base";
+    try {
+      const label = fs.readFileSync(userTemplateLabelPath(), "utf8").trim();
+      if (label) name = label;
+    } catch {
+      /* ignore */
+    }
+    return { kind: "custom", path: custom, name };
   }
   const baked = bakedTemplatePath();
   if (!fs.existsSync(baked)) {
     throw new Error("baked empty template is missing (web/templates/Untitled-4.syx)");
   }
   return { kind: "baked", path: baked, name: "Baked empty" };
+}
+
+export function emptyDestCatalog(file = "Baked empty"): Catalog {
+  return {
+    file,
+    messages: 0,
+    sample_slots_used: 0,
+    patterns: [],
+    kits: [],
+  };
+}
+
+export async function catalogDestTemplate(): Promise<{
+  kind: "baked" | "custom";
+  name: string;
+  catalog: Catalog;
+}> {
+  const t = activeTemplate();
+  if (t.kind === "baked") {
+    return {
+      kind: "baked",
+      name: t.name,
+      catalog: emptyDestCatalog(t.name),
+    };
+  }
+  const { stdout } = await runBuilder(["catalog", "--json", t.path]);
+  const catalog = JSON.parse(stdout) as Catalog;
+  return { kind: t.kind, name: t.name, catalog };
 }
 
 const SAFE_NAME = /^[A-Za-z0-9._-]{1,80}\.syx$/i;

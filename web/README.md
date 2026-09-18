@@ -15,7 +15,7 @@ npm run dev
 
 Opens on [http://127.0.0.1:43147](http://127.0.0.1:43147).
 
-Drop `.syx` dumps onto SOURCE. They are copied into an app-owned library (`~/Library/Application Support/rytm-builder/library`), not the Cursor store. Dest base defaults to the baked empty `Untitled-4` template; drop/choose another project to override.
+Drop `.syx` dumps onto SOURCE. They are copied into an app-owned library (`~/Library/Application Support/rytm-builder/library`), not the Cursor store. Dest base defaults to the baked empty `Untitled-4` template (all dest cells empty). Drop/choose another project as dest base and the A–H grid lights nonempty pattern cells from that dump; reset to baked clears occupancy.
 
 ```bash
 export RYTM_BUILDER=/path/to/rytm-builder

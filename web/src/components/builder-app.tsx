@@ -15,6 +15,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import type { Catalog, DumpInfo, PatternRow, PickRow } from "@/lib/types";
 
+const EMPTY_DEST: Catalog = {
+  file: "Baked empty",
+  messages: 0,
+  sample_slots_used: 0,
+  patterns: [],
+  kits: [],
+};
+
 function destLabel(i: number): string {
   const bank = String.fromCharCode(65 + Math.floor(i / 16));
   const slot = (i % 16) + 1;
@@ -64,6 +72,9 @@ export function BuilderApp() {
   const [loadingCatalog, setLoadingCatalog] = useState(false);
 
   const [picks, setPicks] = useState<PickRow[]>([]);
+  const [destCatalog, setDestCatalog] = useState<Catalog | null>(EMPTY_DEST);
+  const [loadingDest, setLoadingDest] = useState(false);
+  const [destError, setDestError] = useState<string | null>(null);
   const [held, setHeld] = useState<Held | null>(null);
   const [selectedCell, setSelectedCell] = useState<number | null>(null);
   const [outName, setOutName] = useState("Fresh_from_picks");
@@ -77,6 +88,41 @@ export function BuilderApp() {
     for (const p of picks) m.set(p.destIndex, p);
     return m;
   }, [picks]);
+
+  const baseByIndex = useMemo(() => {
+    const m = new Map<number, PatternRow>();
+    for (const p of destCatalog?.patterns ?? []) m.set(p.index, p);
+    return m;
+  }, [destCatalog]);
+
+  const applyDestTemplate = useCallback(
+    (data: { kind?: string; name?: string; catalog?: Catalog }) => {
+      const kind = data.kind === "custom" ? "custom" : "baked";
+      const catalog = data.catalog ?? EMPTY_DEST;
+      setTemplateKind(kind);
+      setTemplateName(data.name || (kind === "custom" ? "Dropped dest base" : "Baked empty"));
+      setDestCatalog(catalog);
+      setDestError(null);
+      const occupied = new Set(catalog.patterns.map((p) => p.index));
+      setPicks((prev) => prev.filter((p) => !occupied.has(p.destIndex)));
+    },
+    []
+  );
+
+  const loadDestCatalog = useCallback(async () => {
+    setLoadingDest(true);
+    setDestError(null);
+    try {
+      const res = await fetch("/api/catalog?dest=1");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "could not catalog dest base");
+      applyDestTemplate(data);
+    } catch (e) {
+      setDestError(e instanceof Error ? e.message : "could not catalog dest base");
+    } finally {
+      setLoadingDest(false);
+    }
+  }, [applyDestTemplate]);
 
   const loadDumps = useCallback(async () => {
     setLoadingList(true);
@@ -114,13 +160,13 @@ export function BuilderApp() {
       if (into === "template") {
         const first = syx[0];
         if (!first) return;
+        setLoadingDest(true);
         const fd = new FormData();
         fd.append("file", first, first.name);
         const res = await fetch("/api/template", { method: "POST", body: fd });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "could not set dest base");
-        setTemplateKind("custom");
-        setTemplateName(data.name || "Dropped dest base");
+        applyDestTemplate(data);
       } else {
         const fd = new FormData();
         for (const f of syx) fd.append("files", f, f.name);
@@ -136,6 +182,7 @@ export function BuilderApp() {
       setListError(e instanceof Error ? e.message : "import failed");
     } finally {
       setImporting(false);
+      if (into === "template") setLoadingDest(false);
     }
   };
 
@@ -146,13 +193,16 @@ export function BuilderApp() {
       setComposeError(data.error || "could not reset dest base");
       return;
     }
-    setTemplateKind("baked");
-    setTemplateName(data.name || "Baked empty");
+    applyDestTemplate(data);
   };
 
   useEffect(() => {
     void loadDumps();
   }, [loadDumps]);
+
+  useEffect(() => {
+    void loadDestCatalog();
+  }, [loadDestCatalog]);
 
   useEffect(() => {
     if (!selected) {
@@ -200,6 +250,13 @@ export function BuilderApp() {
       setSelectedCell(destIndex);
       return;
     }
+    if (baseByIndex.has(destIndex)) {
+      setSelectedCell(destIndex);
+      setComposeError(
+        `dest ${destLabel(destIndex)} already has a pattern — pick an empty cell`
+      );
+      return;
+    }
     pickSeq.current += 1;
     const next: PickRow = {
       id: `${src.dumpPath}:${src.pattern.label}:${pickSeq.current}`,
@@ -221,6 +278,13 @@ export function BuilderApp() {
       return;
     }
     if (selectedCell !== null && selectedCell !== destIndex && byDest.has(selectedCell)) {
+      if (baseByIndex.has(destIndex)) {
+        setSelectedCell(destIndex);
+        setComposeError(
+          `dest ${destLabel(destIndex)} already has a pattern — pick an empty cell`
+        );
+        return;
+      }
       setPicks((prev) => {
         const moving = prev.find((p) => p.destIndex === selectedCell);
         if (!moving) return prev;
@@ -288,6 +352,9 @@ export function BuilderApp() {
   };
 
   const selectedPick = selectedCell !== null ? byDest.get(selectedCell) : undefined;
+  const selectedBase =
+    selectedCell !== null && !selectedPick ? baseByIndex.get(selectedCell) : undefined;
+  const destOccupiedCount = destCatalog?.patterns.length ?? 0;
 
   return (
     <div className="flex min-h-full flex-col bg-background">
@@ -331,7 +398,9 @@ export function BuilderApp() {
             ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → click a dest cell`
             : selectedPick
               ? `${destLabel(selectedPick.destIndex)} ← ${selectedPick.dumpName} ${selectedPick.pattern.label}`
-              : "click ADD then a dest cell (empty cells are first-class)"}
+              : selectedBase && selectedCell !== null
+                ? `${destLabel(selectedCell)} dest base · ${selectedBase.kit_name || selectedBase.label}${selectedBase.kit !== null ? ` · kit ${selectedBase.kit}` : ""}`
+                : "click ADD then a dest cell (empty cells are first-class)"}
         </span>
       </div>
 
@@ -549,7 +618,9 @@ export function BuilderApp() {
             </CardTitle>
             <CardDescription>
               A–H × 1–16. Empty cells stay empty. Base: {templateName}
-              {templateKind === "custom" ? " (override)" : ""}. New file only.
+              {templateKind === "custom" ? " (override)" : ""}
+              {destOccupiedCount > 0 ? ` · ${destOccupiedCount} occupied` : " · all empty"}
+              . New file only.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-3 pt-3">
@@ -577,7 +648,9 @@ export function BuilderApp() {
                   Reset to baked empty
                 </button>
               )}
+              {loadingDest && <span>Cataloging dest base…</span>}
             </div>
+            {destError && <p className="text-sm text-destructive">{destError}</p>}
             <div className="overflow-x-auto">
               <div
                 className="grid gap-px"
@@ -599,6 +672,7 @@ export function BuilderApp() {
                     key={bank}
                     bank={bank}
                     byDest={byDest}
+                    baseByIndex={baseByIndex}
                     selectedCell={selectedCell}
                     held={held}
                     onCell={(i) => moveOrSelectCell(i)}
@@ -620,6 +694,16 @@ export function BuilderApp() {
                 >
                   clear
                 </Button>
+              </div>
+            )}
+            {selectedBase && selectedCell !== null && !selectedPick && (
+              <div className="border border-border bg-secondary px-2 py-2 text-xs">
+                <p>
+                  {destLabel(selectedCell)} occupied in dest base ·{" "}
+                  {selectedBase.kit_name || selectedBase.label}
+                  {selectedBase.kit !== null ? ` · kit ${selectedBase.kit}` : ""} ·{" "}
+                  {selectedBase.trigs} trigs. Pick an empty cell.
+                </p>
               </div>
             )}
             <label className="text-sm">
@@ -658,6 +742,7 @@ export function BuilderApp() {
 function BankRow({
   bank,
   byDest,
+  baseByIndex,
   selectedCell,
   held,
   onCell,
@@ -665,6 +750,7 @@ function BankRow({
 }: {
   bank: number;
   byDest: Map<number, PickRow>;
+  baseByIndex: Map<number, PatternRow>;
   selectedCell: number | null;
   held: Held | null;
   onCell: (i: number) => void;
@@ -679,16 +765,23 @@ function BankRow({
       {Array.from({ length: 16 }, (_, s) => {
         const i = bank * 16 + s;
         const pick = byDest.get(i);
+        const base = baseByIndex.get(i);
         const selected = selectedCell === i;
+        const title = pick
+          ? `${destLabel(i)} ← ${pick.dumpName} ${pick.pattern.label}`
+          : base
+            ? `${destLabel(i)} dest base · ${base.kit_name || base.label}${base.kit !== null ? ` · kit ${base.kit}` : ""}`
+            : `${destLabel(i)} empty`;
+        const label = pick
+          ? (pick.pattern.kit_name || pick.pattern.label).slice(0, 3)
+          : base
+            ? (base.kit_name || base.label).slice(0, 3)
+            : "";
         return (
           <button
             key={i}
             type="button"
-            title={
-              pick
-                ? `${destLabel(i)} ← ${pick.dumpName} ${pick.pattern.label}`
-                : `${destLabel(i)} empty`
-            }
+            title={title}
             onClick={() => onCell(i)}
             onDragOver={(e) => {
               e.preventDefault();
@@ -709,12 +802,14 @@ function BankRow({
             className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${
               pick
                 ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-background text-muted-foreground"
+                : base
+                  ? "border-muted-foreground bg-secondary text-foreground"
+                  : "border-border bg-background text-muted-foreground"
             } ${selected ? "outline outline-1 outline-offset-1 outline-white" : ""} ${
-              held && !pick ? "hover:border-primary" : ""
-            }`}
+              held && !pick && !base ? "hover:border-primary" : ""
+            } ${held && base ? "cursor-not-allowed" : ""}`}
           >
-            {pick ? (pick.pattern.kit_name || pick.pattern.label).slice(0, 3) : ""}
+            {label}
           </button>
         );
       })}
