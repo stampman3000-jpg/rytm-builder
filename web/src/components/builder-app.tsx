@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,9 +12,8 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import type { Catalog, DumpInfo, PickRow } from "@/lib/types";
+import type { Catalog, DumpInfo, PatternRow, PickRow } from "@/lib/types";
 
 function destLabel(i: number): string {
   const bank = String.fromCharCode(65 + Math.floor(i / 16));
@@ -23,24 +21,36 @@ function destLabel(i: number): string {
   return `${bank}${String(slot).padStart(2, "0")}`;
 }
 
+type Held = {
+  dumpPath: string;
+  dumpName: string;
+  pattern: PatternRow;
+};
+
+function silk(text: string) {
+  return (
+    <span className="text-[10px] font-medium tracking-[0.28em] text-muted-foreground uppercase">
+      {text}
+    </span>
+  );
+}
+
 function kindBadge(kind: DumpInfo["kind"]) {
   if (kind === "template") {
     return (
-      <Badge variant="secondary" className="rounded-sm tracking-wide">
+      <Badge variant="secondary" className="rounded-[2px] tracking-wide">
         empty template
       </Badge>
     );
   }
   if (kind === "composed") {
     return (
-      <Badge variant="outline" className="rounded-sm tracking-wide">
+      <Badge variant="outline" className="rounded-[2px] tracking-wide">
         composed
       </Badge>
     );
   }
-  return (
-    <Badge className="rounded-sm tracking-wide">library</Badge>
-  );
+  return <Badge className="rounded-[2px] tracking-wide">library</Badge>;
 }
 
 export function BuilderApp() {
@@ -56,13 +66,19 @@ export function BuilderApp() {
   const [loadingCatalog, setLoadingCatalog] = useState(false);
 
   const [picks, setPicks] = useState<PickRow[]>([]);
+  const [held, setHeld] = useState<Held | null>(null);
+  const [selectedCell, setSelectedCell] = useState<number | null>(null);
   const [outName, setOutName] = useState("Fresh_from_picks");
   const [composing, setComposing] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
   const [composeReport, setComposeReport] = useState<string | null>(null);
   const pickSeq = useRef(0);
-  const dragFrom = useRef<number | null>(null);
-  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  const byDest = useMemo(() => {
+    const m = new Map<number, PickRow>();
+    for (const p of picks) m.set(p.destIndex, p);
+    return m;
+  }, [picks]);
 
   const loadDumps = useCallback(async () => {
     setLoadingList(true);
@@ -118,54 +134,67 @@ export function BuilderApp() {
     };
   }, [selected]);
 
-  const queuedCount = (dumpPath: string, label: string) =>
-    picks.filter((p) => p.dumpPath === dumpPath && p.pattern.label === label)
-      .length;
+  const placedCount = (dumpPath: string, label: string) =>
+    picks.filter((p) => p.dumpPath === dumpPath && p.pattern.label === label).length;
 
-  const addPick = (pattern: NonNullable<Catalog>["patterns"][number]) => {
+  const holdFromCatalog = (pattern: PatternRow) => {
     if (!selected) return;
-    pickSeq.current += 1;
-    const id = `${selected.path}:${pattern.label}:${pickSeq.current}`;
-    setPicks((prev) => [
-      ...prev,
-      {
-        id,
-        dumpPath: selected.path,
-        dumpName: selected.name.replace(/\.syx$/i, ""),
-        pattern,
-      },
-    ]);
+    setHeld({
+      dumpPath: selected.path,
+      dumpName: selected.name.replace(/\.syx$/i, ""),
+      pattern,
+    });
     setComposeReport(null);
     setComposeError(null);
   };
 
-  const removePick = (id: string) => {
-    setPicks((prev) => prev.filter((p) => p.id !== id));
+  const placeHeldAt = (destIndex: number, piece?: Held) => {
+    const src = piece ?? held;
+    if (!src) {
+      setSelectedCell(destIndex);
+      return;
+    }
+    pickSeq.current += 1;
+    const next: PickRow = {
+      id: `${src.dumpPath}:${src.pattern.label}:${pickSeq.current}`,
+      dumpPath: src.dumpPath,
+      dumpName: src.dumpName,
+      pattern: src.pattern,
+      destIndex,
+    };
+    setPicks((prev) => [...prev.filter((p) => p.destIndex !== destIndex), next]);
+    setHeld(null);
+    setSelectedCell(destIndex);
     setComposeReport(null);
+    setComposeError(null);
   };
 
-  const movePick = (index: number, dir: -1 | 1) => {
-    const j = index + dir;
-    setPicks((prev) => {
-      if (j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      const tmp = next[index];
-      next[index] = next[j];
-      next[j] = tmp;
-      return next;
-    });
-    setComposeReport(null);
+  const moveOrSelectCell = (destIndex: number) => {
+    if (held) {
+      placeHeldAt(destIndex);
+      return;
+    }
+    if (selectedCell !== null && selectedCell !== destIndex && byDest.has(selectedCell)) {
+      setPicks((prev) => {
+        const moving = prev.find((p) => p.destIndex === selectedCell);
+        if (!moving) return prev;
+        return [
+          ...prev.filter(
+            (p) => p.destIndex !== selectedCell && p.destIndex !== destIndex
+          ),
+          { ...moving, destIndex },
+        ];
+      });
+      setSelectedCell(destIndex);
+      setComposeReport(null);
+      return;
+    }
+    setSelectedCell(destIndex);
   };
 
-  const reorderPick = (from: number, to: number) => {
-    if (from === to || from < 0 || to < 0) return;
-    setPicks((prev) => {
-      if (from >= prev.length || to >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      return next;
-    });
+  const clearCell = (destIndex: number) => {
+    setPicks((prev) => prev.filter((p) => p.destIndex !== destIndex));
+    if (selectedCell === destIndex) setSelectedCell(null);
     setComposeReport(null);
   };
 
@@ -180,22 +209,24 @@ export function BuilderApp() {
       return;
     }
     if (picks.length === 0) {
-      setComposeError("Add at least one pattern.");
+      setComposeError("Place at least one pattern on the dest grid.");
       return;
     }
     setComposing(true);
     setComposeError(null);
     setComposeReport(null);
     try {
+      const ordered = [...picks].sort((a, b) => a.destIndex - b.destIndex);
       const res = await fetch("/api/compose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           template,
           name: outName,
-          copies: picks.map((p) => ({
+          copies: ordered.map((p) => ({
             path: p.dumpPath,
             pattern: p.pattern.label,
+            dest: destLabel(p.destIndex),
           })),
         }),
       });
@@ -210,30 +241,61 @@ export function BuilderApp() {
     }
   };
 
+  const selectedPick = selectedCell !== null ? byDest.get(selectedCell) : undefined;
+
   return (
-    <div className="flex min-h-full flex-col">
-      <header className="border-b border-border px-4 py-5 md:px-6">
-        <p className="font-sans text-[11px] tracking-[0.32em] text-primary uppercase">
+    <div className="flex min-h-full flex-col bg-background">
+      <header className="border-b border-border px-4 py-4 md:px-6">
+        <p className="text-[11px] tracking-[0.32em] text-primary uppercase">
           rytm-builder
         </p>
-        <h1 className="mt-2 font-heading text-2xl font-semibold tracking-tight md:text-[1.75rem]">
-          Browse dumps. Pick patterns. Export a new project.
+        <h1 className="mt-1 font-heading text-xl font-semibold tracking-tight md:text-2xl">
+          Browse dumps. Place on the grid. Export a new project.
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          This is a composer, not an editor. Originals stay untouched. The new
-          file is settings-first so samples bind on the box. Restore into an
-          empty or disposable Analog Rytm project; samples must already be on
-          +Drive. If it sounds wrong, delete that RAM project — don&apos;t save.
+          Composer, not an editor. Empty dest cells stay empty (A01 can be blank).
+          Pattern+kit copy only — no kit-only, no live send. Settings-first so
+          samples bind on the box. Restore into disposable RAM; +Drive already
+          holds the files.
         </p>
       </header>
 
-      <div className="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3 md:p-6">
-        <Card className="min-h-[280px] rounded-md">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-card px-4 py-2 font-sans text-[11px] tracking-[0.18em] uppercase md:px-6">
+        <span>
+          {silk("PAT")}{" "}
+          <span className="tracking-normal text-foreground">
+            {picks.length}/128
+          </span>
+        </span>
+        <span>
+          {silk("KIT")}{" "}
+          <span className="tracking-normal text-foreground">
+            {picks.length}/128
+          </span>
+        </span>
+        <span>
+          {silk("SMP")}{" "}
+          <span className="tracking-normal text-foreground">
+            ~{Math.min(sampleEstimate, 128)}/128
+          </span>
+        </span>
+        <span className="text-primary">settings-first</span>
+        <span className="min-w-0 flex-1 truncate tracking-normal text-muted-foreground normal-case">
+          {held
+            ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → click a dest cell`
+            : selectedPick
+              ? `${destLabel(selectedPick.destIndex)} ← ${selectedPick.dumpName} ${selectedPick.pattern.label}`
+              : "click ADD then a dest cell (empty cells are first-class)"}
+        </span>
+      </div>
+
+      <div className="grid flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_minmax(0,1.4fr)] md:p-4">
+        <Card>
           <CardHeader className="border-b">
-            <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
-              Source dumps
+            <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
+              Source
             </CardTitle>
-            <CardDescription className="font-sans text-xs break-all">
+            <CardDescription className="text-xs break-all">
               {dumpsDir || "looking for dumps folder…"}
             </CardDescription>
           </CardHeader>
@@ -250,8 +312,8 @@ export function BuilderApp() {
                 and Untitled-4.syx there.
               </p>
             )}
-            <ScrollArea className="h-[min(52vh,420px)]">
-              <ul className="flex flex-col gap-1 pr-2">
+            <ScrollArea className="h-[min(48vh,380px)]">
+              <ul className="flex flex-col gap-px pr-2">
                 {dumps.map((d) => {
                   const active = selected?.path === d.path;
                   return (
@@ -259,7 +321,7 @@ export function BuilderApp() {
                       <button
                         type="button"
                         onClick={() => setSelected(d)}
-                        className={`flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                        className={`flex w-full flex-col gap-0.5 rounded-[2px] px-2 py-1.5 text-left text-sm ${
                           active
                             ? "bg-primary text-primary-foreground"
                             : "hover:bg-muted"
@@ -270,7 +332,7 @@ export function BuilderApp() {
                           {kindBadge(d.kind)}
                         </span>
                         <span
-                          className={`font-sans text-xs ${
+                          className={`text-xs ${
                             active ? "opacity-80" : "text-muted-foreground"
                           }`}
                         >
@@ -285,14 +347,14 @@ export function BuilderApp() {
           </CardContent>
         </Card>
 
-        <Card className="min-h-[280px] rounded-md">
+        <Card>
           <CardHeader className="border-b">
-            <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
-              {selected ? selected.name.replace(/\.syx$/i, "") : "Patterns"}
+            <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
+              {selected ? `Kit / Pat  ${selected.name.replace(/\.syx$/i, "")}` : "Kit / Pat"}
             </CardTitle>
             <CardDescription>
               {catalog
-                ? `${catalog.patterns.length} nonempty · ${catalog.sample_slots_used}/128 sample slots · kit name + sample-ref count, no sample names`
+                ? `${catalog.patterns.length} nonempty · ${catalog.sample_slots_used}/128 sample slots`
                 : "Select a dump to catalog it."}
             </CardDescription>
           </CardHeader>
@@ -312,24 +374,40 @@ export function BuilderApp() {
             )}
             {catalog && catalog.patterns.length === 0 && !loadingCatalog && (
               <p className="text-sm text-muted-foreground">
-                No nonempty patterns. Empty templates stay on the left as the
-                compose base — don&apos;t pick from them.
+                No nonempty patterns. Empty templates are the compose base.
               </p>
             )}
-            <ScrollArea className="h-[min(52vh,420px)]">
-              <ul className="flex flex-col gap-1 pr-2">
+            <ScrollArea className="h-[min(48vh,380px)]">
+              <ul className="flex flex-col gap-px pr-2">
                 {catalog?.patterns.map((p) => {
-                  const n =
-                    selected ? queuedCount(selected.path, p.label) : 0;
+                  const n = selected ? placedCount(selected.path, p.label) : 0;
+                  const isHeld =
+                    held?.dumpPath === selected?.path &&
+                    held?.pattern.label === p.label;
                   return (
                     <li
                       key={p.label}
-                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
+                      draggable={p.kit !== null}
+                      onDragStart={(e) => {
+                        if (!selected || p.kit === null) return;
+                        e.dataTransfer.setData(
+                          "application/json",
+                          JSON.stringify({
+                            dumpPath: selected.path,
+                            dumpName: selected.name.replace(/\.syx$/i, ""),
+                            pattern: p,
+                          } satisfies Held)
+                        );
+                        holdFromCatalog(p);
+                      }}
+                      className={`flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
+                        isHeld ? "bg-primary/20" : "hover:bg-muted/60"
+                      }`}
                     >
                       <div className="min-w-0">
-                        <div className="flex flex-wrap items-baseline gap-2 font-sans">
-                          <span className="font-sans font-medium">{p.label}</span>
-                          <span className="truncate font-sans">
+                        <div className="flex flex-wrap items-baseline gap-2">
+                          <span className="font-medium">{p.label}</span>
+                          <span className="truncate">
                             {p.kit_name || "unnamed kit"}
                             {p.kit !== null ? (
                               <span className="text-muted-foreground">
@@ -341,21 +419,21 @@ export function BuilderApp() {
                             )}
                           </span>
                         </div>
-                        <p className="font-sans text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           {p.trigs} trigs · {p.sample_refs} sample refs
                           {p.smp_nr_plocks > 0
                             ? ` · ${p.smp_nr_plocks} SMP_NR plocks`
                             : ""}
-                          {n > 0 ? ` · queued ×${n}` : ""}
+                          {n > 0 ? ` · on grid ×${n}` : ""}
                         </p>
                       </div>
                       <Button
                         size="sm"
-                        variant={n > 0 ? "secondary" : "default"}
+                        variant={isHeld ? "default" : n > 0 ? "secondary" : "outline"}
                         disabled={p.kit === null}
-                        onClick={() => addPick(p)}
+                        onClick={() => holdFromCatalog(p)}
                       >
-                        {n > 0 ? "add again" : "add"}
+                        {isHeld ? "held" : "add"}
                       </Button>
                     </li>
                   );
@@ -365,127 +443,72 @@ export function BuilderApp() {
           </CardContent>
         </Card>
 
-        <Card className="min-h-[280px] rounded-md">
+        <Card>
           <CardHeader className="border-b">
-            <CardTitle className="font-heading text-xs tracking-[0.18em] uppercase">
-              Fresh project
+            <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
+              Pat dest
             </CardTitle>
             <CardDescription>
-              Dest slots follow this list: A01, A02, … Shuffle with arrows or
-              drag. Same pattern from the same dump can appear more than once.
-              Template {template ? template.split("/").pop() : "missing"}.
-              Never overwrites an existing file.
+              A–H × 1–16. Empty cells stay empty. Template{" "}
+              {template ? template.split("/").pop() : "missing"}. New file only.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-3 pt-3">
-            {picks.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing queued. Add patterns from one or more dumps. Add the
-                same one twice if you want it in two dest slots.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {picks.map((p, i) => (
-                  <li
-                    key={p.id}
-                    draggable
-                    onDragStart={(e) => {
-                      const t = e.target as HTMLElement;
-                      if (t.closest("button")) {
-                        e.preventDefault();
-                        return;
-                      }
-                      dragFrom.current = i;
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setDragOver(i);
-                    }}
-                    onDragLeave={() => {
-                      setDragOver((cur) => (cur === i ? null : cur));
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const from = dragFrom.current;
-                      if (from !== null) reorderPick(from, i);
-                      dragFrom.current = null;
-                      setDragOver(null);
-                    }}
-                    onDragEnd={() => {
-                      dragFrom.current = null;
-                      setDragOver(null);
-                    }}
-                    className={`flex items-start justify-between gap-2 rounded-md px-2 py-2 ${
-                      dragOver === i
-                        ? "bg-primary/15 ring-1 ring-primary/50"
-                        : "bg-muted/50"
-                    }`}
+            <div className="overflow-x-auto">
+              <div
+                className="grid gap-px"
+                style={{
+                  gridTemplateColumns: "1.4rem repeat(16, minmax(1.1rem, 1fr))",
+                }}
+              >
+                <div />
+                {Array.from({ length: 16 }, (_, s) => (
+                  <div
+                    key={s}
+                    className="pb-1 text-center text-[9px] tracking-wide text-muted-foreground"
                   >
-                    <div className="flex min-w-0 items-start gap-1">
-                      <span
-                        className="mt-0.5 cursor-grab text-muted-foreground active:cursor-grabbing"
-                        title="Drag to reorder"
-                        aria-hidden
-                      >
-                        <GripVertical className="size-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-sans text-sm">
-                          {destLabel(i)} ← {p.dumpName} {p.pattern.label}
-                        </p>
-                        <p className="font-sans text-xs text-muted-foreground">
-                          {p.pattern.kit_name || "unnamed"} ·{" "}
-                          {p.pattern.sample_refs} sample refs
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={`Move ${destLabel(i)} up`}
-                        disabled={i === 0}
-                        onClick={() => movePick(i, -1)}
-                      >
-                        <ChevronUp />
-                      </Button>
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={`Move ${destLabel(i)} down`}
-                        disabled={i === picks.length - 1}
-                        onClick={() => movePick(i, 1)}
-                      >
-                        <ChevronDown />
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        onClick={() => removePick(p.id)}
-                      >
-                        remove
-                      </Button>
-                    </div>
-                  </li>
+                    {String(s + 1).padStart(2, "0")}
+                  </div>
                 ))}
-              </ul>
+                {Array.from({ length: 8 }, (_, bank) => (
+                  <BankRow
+                    key={bank}
+                    bank={bank}
+                    byDest={byDest}
+                    selectedCell={selectedCell}
+                    held={held}
+                    onCell={(i) => moveOrSelectCell(i)}
+                    onDropHeld={(i, piece) => placeHeldAt(i, piece)}
+                  />
+                ))}
+              </div>
+            </div>
+            {selectedPick && (
+              <div className="flex items-start justify-between gap-2 border border-border bg-muted px-2 py-2 text-xs">
+                <p>
+                  {destLabel(selectedPick.destIndex)} ← {selectedPick.dumpName}{" "}
+                  {selectedPick.pattern.label} · {selectedPick.pattern.kit_name || "unnamed"}
+                </p>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => clearCell(selectedPick.destIndex)}
+                >
+                  clear
+                </Button>
+              </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Rough sample-slot sum {sampleEstimate} (reuse may lower this; ceiling
-              is 128).
-            </p>
-            <Separator />
             <label className="text-sm">
               New file name
               <Input
-                className="mt-1 rounded-md font-sans"
+                className="mt-1 rounded-[2px] font-sans"
                 value={outName}
                 onChange={(e) => setOutName(e.target.value)}
                 placeholder="Fresh_from_picks"
               />
             </label>
             <Button
-              className="rounded-md"
+              className="rounded-[2px]"
               onClick={() => void exportFresh()}
               disabled={composing || picks.length === 0}
             >
@@ -497,7 +520,7 @@ export function BuilderApp() {
             {composeReport && (
               <Textarea
                 readOnly
-                className="min-h-40 font-sans text-xs"
+                className="min-h-40 rounded-[2px] font-sans text-xs"
                 value={composeReport}
               />
             )}
@@ -505,5 +528,72 @@ export function BuilderApp() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function BankRow({
+  bank,
+  byDest,
+  selectedCell,
+  held,
+  onCell,
+  onDropHeld,
+}: {
+  bank: number;
+  byDest: Map<number, PickRow>;
+  selectedCell: number | null;
+  held: Held | null;
+  onCell: (i: number) => void;
+  onDropHeld: (i: number, piece: Held) => void;
+}) {
+  const letter = String.fromCharCode(65 + bank);
+  return (
+    <>
+      <div className="flex items-center text-[10px] tracking-[0.2em] text-muted-foreground">
+        {letter}
+      </div>
+      {Array.from({ length: 16 }, (_, s) => {
+        const i = bank * 16 + s;
+        const pick = byDest.get(i);
+        const selected = selectedCell === i;
+        return (
+          <button
+            key={i}
+            type="button"
+            title={
+              pick
+                ? `${destLabel(i)} ← ${pick.dumpName} ${pick.pattern.label}`
+                : `${destLabel(i)} empty`
+            }
+            onClick={() => onCell(i)}
+            onDragOver={(e) => {
+              e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const raw = e.dataTransfer.getData("application/json");
+              if (!raw) {
+                if (held) onDropHeld(i, held);
+                return;
+              }
+              try {
+                onDropHeld(i, JSON.parse(raw) as Held);
+              } catch {
+                if (held) onDropHeld(i, held);
+              }
+            }}
+            className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${
+              pick
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-background text-muted-foreground"
+            } ${selected ? "outline outline-1 outline-offset-1 outline-white" : ""} ${
+              held && !pick ? "hover:border-primary" : ""
+            }`}
+          >
+            {pick ? (pick.pattern.kit_name || pick.pattern.label).slice(0, 3) : ""}
+          </button>
+        );
+      })}
+    </>
   );
 }

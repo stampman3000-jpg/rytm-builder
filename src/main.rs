@@ -13,7 +13,8 @@ fn usage() -> ! {
         "rytm-builder — compose a fresh Analog Rytm project .syx (no overwrite, no MIDI)\n\n\
          rytm-builder catalog [--json] <dump.syx>\n\
          rytm-builder compose --template <empty.syx> --out <new.syx> --copy <dump.syx:A03> [...]\n\
-             [--report <report.txt>]\n"
+             [--copy <dump.syx:A03:C04>] [--report <report.txt>]\n\
+             Dest C04 leaves A01 empty. PATH:PATTERN still auto-packs first empty slot.\n"
     );
     std::process::exit(2);
 }
@@ -99,7 +100,7 @@ fn run() -> Result<(), String> {
             let mut reports = Vec::new();
             for spec in &specs {
                 let src = load_project(Path::new(&spec.src_path))?;
-                let r = copy_pattern_kit(&src, &mut dest, spec.pattern)?;
+                let r = copy_pattern_kit(&src, &mut dest, spec.pattern, spec.dest)?;
                 reports.push(r);
             }
             let check = write_settings_first(&dest, &out)?;

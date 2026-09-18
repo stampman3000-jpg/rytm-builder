@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 type Body = {
   template: string;
   name: string;
-  copies: { path: string; pattern: string }[];
+  copies: { path: string; pattern: string; dest: string }[];
 };
 
 export async function POST(req: Request) {
@@ -27,7 +27,13 @@ export async function POST(req: Request) {
       if (!c.pattern) {
         return NextResponse.json({ error: "each copy needs a pattern" }, { status: 400 });
       }
-      args.push("--copy", `${src}:${c.pattern}`);
+      if (!c.dest) {
+        return NextResponse.json(
+          { error: "each copy needs a dest slot (A01–H16)" },
+          { status: 400 }
+        );
+      }
+      args.push("--copy", `${src}:${c.pattern}:${c.dest}`);
     }
     const { stdout } = await runBuilder(args);
     return NextResponse.json({

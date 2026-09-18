@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 pub struct CopySpec {
     pub src_path: String,
     pub pattern: u8,
+    pub dest: Option<u8>,
 }
 
 pub struct RemapLine {
@@ -29,12 +30,22 @@ pub struct CopyReport {
 }
 
 pub fn parse_copy_spec(s: &str) -> Result<CopySpec, String> {
-    let (path, pat) = s
+    let (left, last) = s
         .rsplit_once(':')
-        .ok_or_else(|| format!("--copy wants PATH:PATTERN (got {s:?})"))?;
+        .ok_or_else(|| format!("--copy wants PATH:PATTERN or PATH:PATTERN:DEST (got {s:?})"))?;
+    if let Some((path, mid)) = left.rsplit_once(':') {
+        if parse_pattern_index(mid).is_ok() && parse_pattern_index(last).is_ok() {
+            return Ok(CopySpec {
+                src_path: path.to_string(),
+                pattern: parse_pattern_index(mid)?,
+                dest: Some(parse_pattern_index(last)?),
+            });
+        }
+    }
     Ok(CopySpec {
-        src_path: path.to_string(),
-        pattern: parse_pattern_index(pat)?,
+        src_path: left.to_string(),
+        pattern: parse_pattern_index(last)?,
+        dest: None,
     })
 }
 
@@ -126,6 +137,24 @@ fn first_free_kit(dest: &Project) -> Result<u8, String> {
     Err("no free destination kit slot".into())
 }
 
+fn dest_kit_for_slot(dest: &Project, dest_pat: u8) -> Result<u8, String> {
+    let used = nonempty_pattern_kits(dest);
+    if find_raw(dest, OBJ_KIT, dest_pat).is_none() {
+        return Err(format!(
+            "dest missing kit {} for pattern {}",
+            dest_pat,
+            pattern_label(dest_pat)
+        ));
+    }
+    if used[dest_pat as usize] {
+        return Err(format!(
+            "dest kit {} is already used by another pattern",
+            dest_pat
+        ));
+    }
+    Ok(dest_pat)
+}
+
 fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
     for t in 0..KIT_TRACK_COUNT {
         let off = KIT_TRACKS + t * SOUND_RAW_SZ + SOUND_SAMPLE_NR;
@@ -164,10 +193,12 @@ fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) ->
 }
 
 /// Copy one source pattern + linked kit into dest (template). Mutates dest in place.
+/// `dest_pat`: explicit pattern index (grid cell). `None` = first empty (legacy auto-pack).
 pub fn copy_pattern_kit(
     src: &Project,
     dest: &mut Project,
     src_pat: u8,
+    dest_pat: Option<u8>,
 ) -> Result<CopyReport, String> {
     let sp = find_raw(src, OBJ_PATTERN, src_pat)
         .ok_or_else(|| format!("{}: missing pattern {}", src.path, pattern_label(src_pat)))?;
@@ -197,8 +228,27 @@ pub fn copy_pattern_kit(
     }
     let ss =
         find_raw(src, OBJ_SETTINGS, 0).ok_or_else(|| format!("{}: missing settings", src.path))?;
-    let dest_pat = first_empty_pattern(dest)?;
-    let dest_kit = first_free_kit(dest)?;
+    let explicit_dest = dest_pat.is_some();
+    let dest_pat = match dest_pat {
+        Some(n) => {
+            let p = find_raw(dest, OBJ_PATTERN, n).ok_or_else(|| {
+                format!("dest missing pattern {}", pattern_label(n))
+            })?;
+            if count_pattern_trigs(&p.raw) != 0 {
+                return Err(format!(
+                    "dest {} already has a pattern — pick an empty cell",
+                    pattern_label(n)
+                ));
+            }
+            n
+        }
+        None => first_empty_pattern(dest)?,
+    };
+    let dest_kit = if explicit_dest {
+        dest_kit_for_slot(dest, dest_pat)?
+    } else {
+        first_free_kit(dest)?
+    };
 
     let needed = needed_sample_slots(&sk.raw, &sp.raw);
     let mut remap = [-1i16; 128];
@@ -349,7 +399,16 @@ mod tests {
         let s = parse_copy_spec("/tmp/x.syx:A03").unwrap();
         assert_eq!(s.src_path, "/tmp/x.syx");
         assert_eq!(s.pattern, 2);
+        assert_eq!(s.dest, None);
         assert!(parse_copy_spec("nocolon").is_err());
         assert_eq!(parse_copy_spec("foo.syx:H16").unwrap().pattern, 127);
+        let d = parse_copy_spec("/tmp/x.syx:A03:C04").unwrap();
+        assert_eq!(d.src_path, "/tmp/x.syx");
+        assert_eq!(d.pattern, 2);
+        assert_eq!(d.dest, Some(35));
+        let colon_path = parse_copy_spec("/tmp/weird:name.syx:A01").unwrap();
+        assert_eq!(colon_path.src_path, "/tmp/weird:name.syx");
+        assert_eq!(colon_path.pattern, 0);
+        assert_eq!(colon_path.dest, None);
     }
 }

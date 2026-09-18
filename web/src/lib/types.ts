@@ -35,4 +35,5 @@ export type PickRow = {
   dumpPath: string;
   dumpName: string;
   pattern: PatternRow;
+  destIndex: number;
 };

@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — catalog dumps, pick patterns, shuffle the Fresh Project queue, export a new `.syx` through this same CLI. Dest slots follow queue order. Restore model unchanged: disposable RAM project, delete if bad.
+Local app at http://127.0.0.1:43147 — catalog dumps, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), export a new `.syx` through this same CLI. Restore model unchanged: disposable RAM project, delete if bad.
 
 ## Catalog a dump
 
@@ -37,14 +37,14 @@ Prints nonempty patterns (A01–H16), linked kit name/index, trig counts, and ki
 
 ## Compose a fresh project
 
-Use an **empty whole-project dump** as `--template` (a newly created Rytm project, saved and dumped — not a file this tool “clears”). Copy one or more `PATH:PATTERN` pairs. Destination slots fill from the first empty pattern and first free kit.
+Use an **empty whole-project dump** as `--template` (a newly created Rytm project, saved and dumped — not a file this tool “clears”). Copy one or more `PATH:PATTERN` or `PATH:PATTERN:DEST` pairs. With no dest, slots fill from the first empty pattern (legacy). With dest (e.g. `C04`), that cell is written and others stay empty.
 
 ```bash
 cargo run -- compose \
   --template /path/to/Untitled-4.syx \
   --out /path/to/Fresh.syx \
-  --copy /path/to/Untitled-1.syx:A03 \
-  --copy /path/to/Untitled.syx:A01 \
+  --copy /path/to/Untitled-1.syx:A03:C04 \
+  --copy /path/to/Untitled.syx:A01:C05 \
   --report /path/to/Fresh.txt
 ```
 
