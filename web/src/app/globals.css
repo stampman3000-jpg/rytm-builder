@@ -156,8 +156,10 @@
   }
   code,
   kbd,
+  samp,
   pre,
   .font-mono {
-    font-family: inherit;
+    font-family: var(--font-plex-sans), "IBM Plex Sans", ui-sans-serif,
+      system-ui, sans-serif;
   }
 }
