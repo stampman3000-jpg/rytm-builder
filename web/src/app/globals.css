@@ -9,7 +9,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-plex-sans), "IBM Plex Sans", ui-sans-serif, system-ui,
     sans-serif;
-  --font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
+  --font-mono: var(--font-plex-sans), "IBM Plex Sans", ui-sans-serif, system-ui,
+    sans-serif;
   --font-heading: var(--font-plex-sans), "IBM Plex Sans", ui-sans-serif,
     system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
@@ -157,6 +158,6 @@
   kbd,
   pre,
   .font-mono {
-    font-family: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
+    font-family: inherit;
   }
 }

@@ -328,7 +328,7 @@ export function BuilderApp() {
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-baseline gap-2 font-sans">
-                          <span className="font-mono font-medium">{p.label}</span>
+                          <span className="font-sans font-medium">{p.label}</span>
                           <span className="truncate font-sans">
                             {p.kit_name || "unnamed kit"}
                             {p.kit !== null ? (
@@ -431,12 +431,7 @@ export function BuilderApp() {
                       </span>
                       <div className="min-w-0">
                         <p className="font-sans text-sm">
-                          <span className="font-mono">{destLabel(i)}</span>
-                          <span>
-                            {" "}
-                            ← {p.dumpName}{" "}
-                          </span>
-                          <span className="font-mono">{p.pattern.label}</span>
+                          {destLabel(i)} ← {p.dumpName} {p.pattern.label}
                         </p>
                         <p className="font-sans text-xs text-muted-foreground">
                           {p.pattern.kit_name || "unnamed"} ·{" "}
