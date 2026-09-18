@@ -229,6 +229,86 @@ pub fn write_settings_first(project: &Project, path: &Path) -> Result<ExportChec
     Ok(check)
 }
 
+/// Objects that differ from `before` (dest-base): settings + changed patterns
+/// and the kits those nonempty patterns now use. Order: settings, kits, patterns.
+pub fn collect_edits(before: &Project, after: &Project) -> Result<Vec<Object>, String> {
+    let settings = find_raw(after, OBJ_SETTINGS, 0)
+        .ok_or_else(|| "destination missing settings".to_string())?
+        .clone();
+
+    let mut pattern_nrs = Vec::new();
+    for nr in 0..128u8 {
+        let b = find_raw(before, OBJ_PATTERN, nr);
+        let a = find_raw(after, OBJ_PATTERN, nr);
+        let same = match (b, a) {
+            (Some(x), Some(y)) => x.raw == y.raw,
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            pattern_nrs.push(nr);
+        }
+    }
+    if pattern_nrs.is_empty() {
+        return Err("edits would be empty — dest matches dest-base patterns".into());
+    }
+
+    let mut kit_nrs = std::collections::BTreeSet::new();
+    let mut patterns = Vec::new();
+    for nr in pattern_nrs {
+        let p = find_raw(after, OBJ_PATTERN, nr)
+            .ok_or_else(|| format!("dest missing pattern {}", crate::layout::pattern_label(nr)))?
+            .clone();
+        if count_pattern_trigs(&p.raw) != 0 {
+            let kn = pattern_kit_number(&p.raw);
+            if kn < 128 {
+                kit_nrs.insert(kn);
+            }
+        }
+        patterns.push(p);
+    }
+
+    let mut kits = Vec::new();
+    for kn in kit_nrs {
+        let k = find_raw(after, OBJ_KIT, kn).ok_or_else(|| {
+            format!("dest missing kit {kn} linked from an edited pattern")
+        })?;
+        kits.push(k.clone());
+    }
+
+    let mut objects = Vec::with_capacity(1 + kits.len() + patterns.len());
+    objects.push(settings);
+    objects.extend(kits);
+    objects.extend(patterns);
+    Ok(objects)
+}
+
+pub fn write_objects_syx(objects: &[Object], path: &Path) -> Result<ExportCheck, String> {
+    if path.exists() {
+        return Err(format!(
+            "refusing to overwrite existing {} — pick a new name",
+            path.display()
+        ));
+    }
+    if objects.is_empty() {
+        return Err("edits export is empty".into());
+    }
+    let mut bytes = Vec::new();
+    for o in objects {
+        bytes.extend_from_slice(&o.sysex);
+    }
+    let check = inspect_export(&bytes)?;
+    if check.messages != objects.len() {
+        return Err(format!(
+            "edits message count {} != in-memory {}",
+            check.messages,
+            objects.len()
+        ));
+    }
+    std::fs::write(path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(check)
+}
+
 pub fn find_raw(project: &Project, obj_type: u8, nr: u8) -> Option<&Object> {
     project
         .objects

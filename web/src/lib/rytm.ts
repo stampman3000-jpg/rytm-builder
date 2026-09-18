@@ -180,6 +180,21 @@ export function dumpKind(name: string): DumpKind {
   return "library";
 }
 
+export function resolveExportFile(name: string): string {
+  ensureAppDirs();
+  const base = safeSyxName(name);
+  const p = path.join(exportsDir(), base);
+  if (!fs.existsSync(p)) {
+    throw new Error(`not an export: ${base}`);
+  }
+  const resolved = fs.realpathSync(p);
+  const dir = fs.realpathSync(exportsDir());
+  if (resolved !== dir && !resolved.startsWith(dir + path.sep)) {
+    throw new Error("path is outside the export folder");
+  }
+  return resolved;
+}
+
 export function builderBin(): string {
   return (
     process.env.RYTM_BUILDER ||

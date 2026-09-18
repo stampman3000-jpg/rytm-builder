@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), drag dest cells to rearrange (vacate or swap). Grey matches dest base; red is the differential. Export a new `.syx`. Default dest base is the baked empty Untitled-4 template (all dest cells empty). Dropping a project as dest base catalogs it and lights occupied pattern cells. Restore model unchanged: disposable RAM project, delete if bad.
+Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), drag dest cells to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). This tool never talks USB. Restore model: receive the file in a sysex editor.
 
 ## Catalog a dump
 
@@ -58,11 +58,21 @@ Rules the tool will not bend:
 
 ## Restore on the Rytm
 
+This app never talks to the device. Receive the downloaded `.syx` in Transfer / C6 / similar.
+
+**Whole project** (`--out` / Download project):
+
 1. Samples for those fingerprints must already be on +Drive.
 2. Open an empty or disposable project in RAM (do not send onto a project you care about).
-3. Receive the new `.syx` as a **whole project**.
+3. Receive the `.syx` as a **whole project**.
 4. Check pattern slots, kit names, analog sound, and that samples are bound (not SMPL OFF).
 5. Save the project on the device if it sounds right.
+
+**Edits** (`--edits-out` / Download edits):
+
+1. The project **already in RAM must be the dest-base dump** (grey cells).
+2. Receive the smaller `.syx` (settings, then kits, then patterns). Vacated slots come through as empty patterns.
+3. Same sample / analog checks on the red cells only. Grey neighbours should be untouched.
 
 ## What this version does not do
 

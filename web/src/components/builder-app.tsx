@@ -373,7 +373,7 @@ export function BuilderApp() {
     return { copies, vacates };
   }, [byDest, baseByIndex]);
 
-  const exportFresh = async () => {
+  const exportFresh = async (mode: "project" | "edits") => {
     if (!templateKind) {
       setComposeError("Baked empty template is missing.");
       return;
@@ -392,6 +392,7 @@ export function BuilderApp() {
         body: JSON.stringify({
           template: templateKind,
           name: outName,
+          mode,
           copies: diff.copies,
           vacates: diff.vacates,
         }),
@@ -399,6 +400,18 @@ export function BuilderApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "compose failed");
       setComposeReport(data.text);
+      if (data.out) {
+        const fileRes = await fetch(`/api/exports/${encodeURIComponent(data.out)}`);
+        if (!fileRes.ok) {
+          throw new Error("composed, but download failed — pick a new name and retry");
+        }
+        const blob = await fileRes.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = data.out as string;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
       await loadDumps();
     } catch (e) {
       setComposeError(e instanceof Error ? e.message : "compose failed");
@@ -808,13 +821,29 @@ export function BuilderApp() {
                 placeholder="Fresh_from_picks"
               />
             </label>
-            <Button
-              className="rounded-[2px]"
-              onClick={() => void exportFresh()}
-              disabled={composing || diffCount === 0}
-            >
-              {composing ? "Composing…" : "Export new .syx"}
-            </Button>
+            <p className="text-xs text-muted-foreground">
+              Downloads a .syx. This app never talks to the Rytm — receive the
+              file in your sysex editor. Project = whole dump into empty RAM.
+              Edits = red cells only onto dest-base already in RAM. Pattern+kit
+              together.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                className="rounded-[2px] flex-1"
+                onClick={() => void exportFresh("project")}
+                disabled={composing || diffCount === 0}
+              >
+                {composing ? "Composing…" : "Download project .syx"}
+              </Button>
+              <Button
+                className="rounded-[2px] flex-1"
+                variant="secondary"
+                onClick={() => void exportFresh("edits")}
+                disabled={composing || diffCount === 0}
+              >
+                {composing ? "Composing…" : "Download edits .syx"}
+              </Button>
+            </div>
             {composeError && (
               <p className="text-sm text-destructive">{composeError}</p>
             )}

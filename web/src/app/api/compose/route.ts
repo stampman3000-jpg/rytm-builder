@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 type Body = {
   template?: "baked" | "custom";
   name: string;
+  mode?: "project" | "edits";
   copies?: { path: string; pattern: string; dest: string }[];
   vacates?: string[];
 };
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as Body;
     const copies = body.copies ?? [];
     const vacates = body.vacates ?? [];
+    const mode = body.mode === "edits" ? "edits" : "project";
     if (!body.name || (copies.length === 0 && vacates.length === 0)) {
       return NextResponse.json(
         { error: "need output name and at least one copy or vacate" },
@@ -28,9 +30,16 @@ export async function POST(req: Request) {
       );
     }
     const template = resolveTemplateFile(body.template);
-    const out = newExportPath(body.name);
+    const stem = body.name.replace(/\.syx$/i, "");
+    const outName = mode === "edits" ? `${stem}__edits` : stem;
+    const out = newExportPath(outName);
     const report = out.replace(/\.syx$/i, ".txt");
-    const args = ["compose", "--template", template, "--out", out, "--report", report];
+    const args = ["compose", "--template", template, "--report", report];
+    if (mode === "edits") {
+      args.push("--edits-out", out);
+    } else {
+      args.push("--out", out);
+    }
     for (const slot of vacates) {
       if (!slot) {
         return NextResponse.json({ error: "each vacate needs a dest slot" }, { status: 400 });
@@ -54,9 +63,11 @@ export async function POST(req: Request) {
       args.push("--copy", `${src}:${c.pattern}:${c.dest}`);
     }
     const { stdout } = await runBuilder(args);
+    const file = `${outName}.syx`;
     return NextResponse.json({
-      out: `${body.name.replace(/\.syx$/i, "")}.syx`,
-      report: `${body.name.replace(/\.syx$/i, "")}.txt`,
+      out: file,
+      report: `${outName}.txt`,
+      mode,
       text: scrubPaths(stdout),
     });
   } catch (e) {

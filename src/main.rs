@@ -3,9 +3,14 @@ mod compose;
 mod layout;
 mod project;
 
-use compose::{copy_pattern_kit, format_report, parse_copy_spec, vacate_pattern};
+use compose::{
+    copy_pattern_kit, format_edits_lines, format_report, parse_copy_spec, vacate_pattern,
+};
 use layout::parse_pattern_index;
-use project::{load_project, md5_file, sample_slots_used, write_settings_first};
+use project::{
+    collect_edits, load_project, md5_file, sample_slots_used, write_objects_syx,
+    write_settings_first,
+};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -13,10 +18,13 @@ fn usage() -> ! {
     eprintln!(
         "rytm-builder — compose a fresh Analog Rytm project .syx (no overwrite, no MIDI)\n\n\
          rytm-builder catalog [--json] <dump.syx>\n\
-         rytm-builder compose --template <empty.syx> --out <new.syx> --copy <dump.syx:A03> [...]\n\
-             [--copy <dump.syx:A03:C04>] [--vacate A03] [--report <report.txt>]\n\
+         rytm-builder compose --template <base.syx> --out <new.syx> --copy <dump.syx:A03> [...]\n\
+             [--copy <dump.syx:A03:C04>] [--vacate A03] [--edits-out <edits.syx>] [--report <report.txt>]\n\
              Dest C04 leaves A01 empty. PATH:PATTERN still auto-packs first empty slot.\n\
-             --vacate empties a dest pattern (move away / differential). PAT+KIT copy only.\n"
+             --vacate empties a dest pattern (move away / differential). PAT+KIT copy only.\n\
+             --out writes a whole-project .syx (restore into empty/disposable RAM).\n\
+             --edits-out writes settings + changed kits/patterns only (restore onto dest-base in RAM).\n\
+             This tool never talks USB/MIDI.\n"
     );
     std::process::exit(2);
 }
@@ -69,7 +77,8 @@ fn run() -> Result<(), String> {
         "compose" => {
             let template =
                 take_flag(&mut args, "--template").ok_or("compose needs --template <empty.syx>")?;
-            let out = take_flag(&mut args, "--out").ok_or("compose needs --out <new.syx>")?;
+            let out = take_flag(&mut args, "--out");
+            let edits_out = take_flag(&mut args, "--edits-out");
             let report = take_flag(&mut args, "--report");
             let copies = take_all(&mut args, "--copy");
             let vacates = take_all(&mut args, "--vacate");
@@ -79,16 +88,30 @@ fn run() -> Result<(), String> {
             if copies.is_empty() && vacates.is_empty() {
                 return Err("compose needs at least one --copy PATH:PATTERN or --vacate SLOT".into());
             }
+            if out.is_none() && edits_out.is_none() {
+                return Err("compose needs --out and/or --edits-out".into());
+            }
             let template = PathBuf::from(template);
-            let out = PathBuf::from(out);
+            let out = out.map(PathBuf::from);
+            let edits_out = edits_out.map(PathBuf::from);
             if !template.is_file() {
                 return Err(format!("template not found: {}", template.display()));
             }
-            if out.exists() {
-                return Err(format!(
-                    "output already exists: {} (choose a new name)",
-                    out.display()
-                ));
+            if let Some(p) = &out {
+                if p.exists() {
+                    return Err(format!(
+                        "output already exists: {} (choose a new name)",
+                        p.display()
+                    ));
+                }
+            }
+            if let Some(p) = &edits_out {
+                if p.exists() {
+                    return Err(format!(
+                        "edits output already exists: {} (choose a new name)",
+                        p.display()
+                    ));
+                }
             }
             let specs: Vec<_> = copies
                 .iter()
@@ -99,7 +122,9 @@ fn run() -> Result<(), String> {
                 watched.push(PathBuf::from(&spec.src_path));
             }
             let before = snapshot_files(&watched)?;
-            let mut dest = load_project(&template)?;
+            let orig = load_project(&template)?;
+            let mut dest = orig.clone();
+            dest.path = orig.path.clone();
             let mut vacated = Vec::new();
             for v in &vacates {
                 let idx = parse_pattern_index(v)?;
@@ -112,7 +137,21 @@ fn run() -> Result<(), String> {
                 let r = copy_pattern_kit(&src, &mut dest, spec.pattern, spec.dest)?;
                 reports.push(r);
             }
-            let check = write_settings_first(&dest, &out)?;
+            let mut out_label = String::from("(none)");
+            let mut check_opt = None;
+            if let Some(p) = &out {
+                let check = write_settings_first(&dest, p)?;
+                out_label = p.display().to_string();
+                check_opt = Some(check);
+            }
+            let mut edits_block = String::new();
+            let mut edits_check = None;
+            if let Some(p) = &edits_out {
+                let objs = collect_edits(&orig, &dest)?;
+                let echeck = write_objects_syx(&objs, p)?;
+                edits_block = format_edits_lines(&p.display().to_string(), &echeck, &objs);
+                edits_check = Some(echeck);
+            }
             let after = snapshot_files(&watched)?;
             let sources_unchanged = before == after;
             if !sources_unchanged {
@@ -121,15 +160,23 @@ fn run() -> Result<(), String> {
                         .into(),
                 );
             }
-            let text = format_report(
+            let check_ref = check_opt
+                .as_ref()
+                .or(edits_check.as_ref())
+                .expect("compose needs --out and/or --edits-out");
+            let mut text = format_report(
                 &template.display().to_string(),
-                &out.display().to_string(),
+                &out_label,
                 &reports,
                 &vacated,
-                &check,
+                check_ref,
                 sources_unchanged,
                 sample_slots_used(&dest),
             );
+            if !edits_block.is_empty() {
+                text.push_str(&edits_block);
+                text.push('\n');
+            }
             print!("{text}");
             if let Some(rp) = report {
                 let rp = PathBuf::from(rp);
@@ -138,11 +185,19 @@ fn run() -> Result<(), String> {
                 }
                 std::fs::write(&rp, &text).map_err(|e| format!("write report: {e}"))?;
             }
-            println!(
-                "OK wrote {} (settings-first, md5 {}). Restore into an empty/disposable project; samples must already be on +Drive.",
-                out.display(),
-                check.md5
-            );
+            if let Some(p) = &out {
+                println!(
+                    "OK wrote {} (whole project, settings-first, md5 {}). Restore into empty/disposable RAM; samples must already be on +Drive. No USB from this tool.",
+                    p.display(),
+                    check_opt.as_ref().map(|c| c.md5.as_str()).unwrap_or("?")
+                );
+            }
+            if let Some(p) = &edits_out {
+                println!(
+                    "OK wrote {} (edits). Restore onto dest-base already in RAM. No USB from this tool.",
+                    p.display()
+                );
+            }
         }
         "-h" | "--help" | "help" => usage(),
         other => {

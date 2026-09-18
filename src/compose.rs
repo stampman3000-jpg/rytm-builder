@@ -418,6 +418,35 @@ pub fn format_report(
     s
 }
 
+pub fn format_edits_lines(
+    path: &str,
+    check: &crate::project::ExportCheck,
+    objects: &[crate::project::Object],
+) -> String {
+    let mut kits = Vec::new();
+    let mut pats = Vec::new();
+    for o in objects {
+        match o.obj_type {
+            OBJ_KIT => kits.push(o.obj_nr.to_string()),
+            OBJ_PATTERN => pats.push(pattern_label(o.obj_nr as u8)),
+            _ => {}
+        }
+    }
+    let mut s = String::new();
+    s.push_str(&format!("  edits:    {path}\n"));
+    s.push_str("  edits_order: settings, kits, patterns (no songs/globals)\n");
+    s.push_str(&format!(
+        "  edits_messages: {}  bytes: {}  md5: {}\n",
+        check.messages, check.bytes, check.md5
+    ));
+    s.push_str(&format!("  edits_kits: {}\n", kits.join(", ")));
+    s.push_str(&format!("  edits_patterns: {}\n", pats.join(", ")));
+    s.push_str(
+        "  restore edits onto dest-base already in RAM (not empty). This tool never talks USB.\n",
+    );
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
