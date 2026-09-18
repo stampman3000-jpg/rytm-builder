@@ -12,15 +12,18 @@ export const dynamic = "force-dynamic";
 type Body = {
   template?: "baked" | "custom";
   name: string;
-  copies: { path: string; pattern: string; dest: string }[];
+  copies?: { path: string; pattern: string; dest: string }[];
+  vacates?: string[];
 };
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
-    if (!body.name || !Array.isArray(body.copies) || body.copies.length === 0) {
+    const copies = body.copies ?? [];
+    const vacates = body.vacates ?? [];
+    if (!body.name || (copies.length === 0 && vacates.length === 0)) {
       return NextResponse.json(
-        { error: "need output name and at least one pattern" },
+        { error: "need output name and at least one copy or vacate" },
         { status: 400 }
       );
     }
@@ -28,7 +31,13 @@ export async function POST(req: Request) {
     const out = newExportPath(body.name);
     const report = out.replace(/\.syx$/i, ".txt");
     const args = ["compose", "--template", template, "--out", out, "--report", report];
-    for (const c of body.copies) {
+    for (const slot of vacates) {
+      if (!slot) {
+        return NextResponse.json({ error: "each vacate needs a dest slot" }, { status: 400 });
+      }
+      args.push("--vacate", slot);
+    }
+    for (const c of copies) {
       if (!c.pattern) {
         return NextResponse.json({ error: "each copy needs a pattern" }, { status: 400 });
       }
@@ -38,7 +47,10 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      const src = resolveLibraryFile(c.path);
+      const src =
+        c.path === "@dest" || c.path === "__dest__"
+          ? template
+          : resolveLibraryFile(c.path);
       args.push("--copy", `${src}:${c.pattern}:${c.dest}`);
     }
     const { stdout } = await runBuilder(args);

@@ -3,7 +3,8 @@ mod compose;
 mod layout;
 mod project;
 
-use compose::{copy_pattern_kit, format_report, parse_copy_spec};
+use compose::{copy_pattern_kit, format_report, parse_copy_spec, vacate_pattern};
+use layout::parse_pattern_index;
 use project::{load_project, md5_file, sample_slots_used, write_settings_first};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -13,8 +14,9 @@ fn usage() -> ! {
         "rytm-builder — compose a fresh Analog Rytm project .syx (no overwrite, no MIDI)\n\n\
          rytm-builder catalog [--json] <dump.syx>\n\
          rytm-builder compose --template <empty.syx> --out <new.syx> --copy <dump.syx:A03> [...]\n\
-             [--copy <dump.syx:A03:C04>] [--report <report.txt>]\n\
-             Dest C04 leaves A01 empty. PATH:PATTERN still auto-packs first empty slot.\n"
+             [--copy <dump.syx:A03:C04>] [--vacate A03] [--report <report.txt>]\n\
+             Dest C04 leaves A01 empty. PATH:PATTERN still auto-packs first empty slot.\n\
+             --vacate empties a dest pattern (move away / differential). PAT+KIT copy only.\n"
     );
     std::process::exit(2);
 }
@@ -70,11 +72,12 @@ fn run() -> Result<(), String> {
             let out = take_flag(&mut args, "--out").ok_or("compose needs --out <new.syx>")?;
             let report = take_flag(&mut args, "--report");
             let copies = take_all(&mut args, "--copy");
+            let vacates = take_all(&mut args, "--vacate");
             if !args.is_empty() {
                 return Err(format!("unexpected args: {args:?}"));
             }
-            if copies.is_empty() {
-                return Err("compose needs at least one --copy PATH:PATTERN".into());
+            if copies.is_empty() && vacates.is_empty() {
+                return Err("compose needs at least one --copy PATH:PATTERN or --vacate SLOT".into());
             }
             let template = PathBuf::from(template);
             let out = PathBuf::from(out);
@@ -97,6 +100,12 @@ fn run() -> Result<(), String> {
             }
             let before = snapshot_files(&watched)?;
             let mut dest = load_project(&template)?;
+            let mut vacated = Vec::new();
+            for v in &vacates {
+                let idx = parse_pattern_index(v)?;
+                vacate_pattern(&mut dest, idx)?;
+                vacated.push(idx);
+            }
             let mut reports = Vec::new();
             for spec in &specs {
                 let src = load_project(Path::new(&spec.src_path))?;
@@ -116,6 +125,7 @@ fn run() -> Result<(), String> {
                 &template.display().to_string(),
                 &out.display().to_string(),
                 &reports,
+                &vacated,
                 &check,
                 sources_unchanged,
                 sample_slots_used(&dest),

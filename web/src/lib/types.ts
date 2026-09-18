@@ -37,3 +37,16 @@ export type PickRow = {
   pattern: PatternRow;
   destIndex: number;
 };
+
+/** Working dest-grid occupant. `origin: "base"` is dest-base dump content. */
+export type DestPiece = {
+  id: string;
+  origin: "base" | "library";
+  dumpPath: string;
+  dumpName: string;
+  pattern: PatternRow;
+  destIndex: number;
+  originIndex: number;
+};
+
+export const DEST_BASE_PATH = "@dest";

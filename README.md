@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), export a new `.syx`. Default dest base is the baked empty Untitled-4 template (all dest cells empty). Dropping a project as dest base catalogs it and lights occupied pattern cells. Restore model unchanged: disposable RAM project, delete if bad.
+Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), drag dest cells to rearrange (vacate or swap). Grey matches dest base; red is the differential. Export a new `.syx`. Default dest base is the baked empty Untitled-4 template (all dest cells empty). Dropping a project as dest base catalogs it and lights occupied pattern cells. Restore model unchanged: disposable RAM project, delete if bad.
 
 ## Catalog a dump
 
@@ -37,7 +37,7 @@ Prints nonempty patterns (A01–H16), linked kit name/index, trig counts, and ki
 
 ## Compose a fresh project
 
-Use an **empty whole-project dump** as `--template` (a newly created Rytm project, saved and dumped — not a file this tool “clears”). Copy one or more `PATH:PATTERN` or `PATH:PATTERN:DEST` pairs. With no dest, slots fill from the first empty pattern (legacy). With dest (e.g. `C04`), that cell is written and others stay empty.
+Use an **empty whole-project dump** as `--template` (a newly created Rytm project, saved and dumped — not a file this tool “clears”). Copy one or more `PATH:PATTERN` or `PATH:PATTERN:DEST` pairs. With no dest, slots fill from the first empty pattern (legacy). With dest (e.g. `C04`), that cell is written and others stay empty. `--vacate A03` empties a dest pattern (needed when rearranging dest-base cells).
 
 ```bash
 cargo run -- compose \

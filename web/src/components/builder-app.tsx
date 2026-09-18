@@ -13,7 +13,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import type { Catalog, DumpInfo, PatternRow, PickRow } from "@/lib/types";
+import type { Catalog, DestPiece, DumpInfo, PatternRow } from "@/lib/types";
+import { DEST_BASE_PATH } from "@/lib/types";
 
 const EMPTY_DEST: Catalog = {
   file: "Baked empty",
@@ -34,6 +35,24 @@ type Held = {
   dumpName: string;
   pattern: PatternRow;
 };
+
+type DragPayload =
+  | ({ kind: "catalog" } & Held)
+  | { kind: "dest"; destIndex: number };
+
+function matchesBase(piece: DestPiece, index: number) {
+  return piece.origin === "base" && piece.originIndex === index;
+}
+
+function cellDiffers(
+  index: number,
+  piece: DestPiece | undefined,
+  base: PatternRow | undefined
+) {
+  if (!piece && !base) return false;
+  if (piece && matchesBase(piece, index)) return false;
+  return true;
+}
 
 function silk(text: string) {
   return (
@@ -71,7 +90,7 @@ export function BuilderApp() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
 
-  const [picks, setPicks] = useState<PickRow[]>([]);
+  const [pieces, setPieces] = useState<DestPiece[]>([]);
   const [destCatalog, setDestCatalog] = useState<Catalog | null>(EMPTY_DEST);
   const [loadingDest, setLoadingDest] = useState(false);
   const [destError, setDestError] = useState<string | null>(null);
@@ -82,12 +101,13 @@ export function BuilderApp() {
   const [composeError, setComposeError] = useState<string | null>(null);
   const [composeReport, setComposeReport] = useState<string | null>(null);
   const pickSeq = useRef(0);
+  const skipCellClick = useRef(false);
 
   const byDest = useMemo(() => {
-    const m = new Map<number, PickRow>();
-    for (const p of picks) m.set(p.destIndex, p);
+    const m = new Map<number, DestPiece>();
+    for (const p of pieces) m.set(p.destIndex, p);
     return m;
-  }, [picks]);
+  }, [pieces]);
 
   const baseByIndex = useMemo(() => {
     const m = new Map<number, PatternRow>();
@@ -99,12 +119,22 @@ export function BuilderApp() {
     (data: { kind?: string; name?: string; catalog?: Catalog }) => {
       const kind = data.kind === "custom" ? "custom" : "baked";
       const catalog = data.catalog ?? EMPTY_DEST;
+      const name = data.name || (kind === "custom" ? "Dropped dest base" : "Baked empty");
       setTemplateKind(kind);
-      setTemplateName(data.name || (kind === "custom" ? "Dropped dest base" : "Baked empty"));
+      setTemplateName(name);
       setDestCatalog(catalog);
       setDestError(null);
-      const occupied = new Set(catalog.patterns.map((p) => p.index));
-      setPicks((prev) => prev.filter((p) => !occupied.has(p.destIndex)));
+      setPieces(
+        catalog.patterns.map((p) => ({
+          id: `base:${p.index}`,
+          origin: "base" as const,
+          dumpPath: DEST_BASE_PATH,
+          dumpName: name.replace(/\.syx$/i, ""),
+          pattern: p,
+          destIndex: p.index,
+          originIndex: p.index,
+        }))
+      );
     },
     []
   );
@@ -231,7 +261,7 @@ export function BuilderApp() {
   }, [selected]);
 
   const placedCount = (dumpPath: string, label: string) =>
-    picks.filter((p) => p.dumpPath === dumpPath && p.pattern.label === label).length;
+    pieces.filter((p) => p.dumpPath === dumpPath && p.pattern.label === label).length;
 
   const holdFromCatalog = (pattern: PatternRow) => {
     if (!selected) return;
@@ -244,28 +274,51 @@ export function BuilderApp() {
     setComposeError(null);
   };
 
+  const rearrangeDest = (from: number, to: number) => {
+    if (from === to) return;
+    setPieces((prev) => {
+      const moving = prev.find((p) => p.destIndex === from);
+      if (!moving) return prev;
+      const target = prev.find((p) => p.destIndex === to);
+      if (!target) {
+        return prev.map((p) => (p.destIndex === from ? { ...p, destIndex: to } : p));
+      }
+      return prev.map((p) => {
+        if (p.destIndex === from) return { ...p, destIndex: to };
+        if (p.destIndex === to) return { ...p, destIndex: from };
+        return p;
+      });
+    });
+    setHeld(null);
+    setSelectedCell(to);
+    setComposeReport(null);
+    setComposeError(null);
+  };
+
   const placeHeldAt = (destIndex: number, piece?: Held) => {
     const src = piece ?? held;
     if (!src) {
       setSelectedCell(destIndex);
       return;
     }
-    if (baseByIndex.has(destIndex)) {
+    if (byDest.has(destIndex)) {
       setSelectedCell(destIndex);
       setComposeError(
-        `dest ${destLabel(destIndex)} already has a pattern — pick an empty cell`
+        `dest ${destLabel(destIndex)} is occupied — drop on empty, or drag dest cells to swap`
       );
       return;
     }
     pickSeq.current += 1;
-    const next: PickRow = {
+    const next: DestPiece = {
       id: `${src.dumpPath}:${src.pattern.label}:${pickSeq.current}`,
+      origin: "library",
       dumpPath: src.dumpPath,
       dumpName: src.dumpName,
       pattern: src.pattern,
       destIndex,
+      originIndex: src.pattern.index,
     };
-    setPicks((prev) => [...prev.filter((p) => p.destIndex !== destIndex), next]);
+    setPieces((prev) => [...prev.filter((p) => p.destIndex !== destIndex), next]);
     setHeld(null);
     setSelectedCell(destIndex);
     setComposeReport(null);
@@ -273,71 +326,74 @@ export function BuilderApp() {
   };
 
   const moveOrSelectCell = (destIndex: number) => {
+    if (skipCellClick.current) {
+      skipCellClick.current = false;
+      setSelectedCell(destIndex);
+      return;
+    }
     if (held) {
       placeHeldAt(destIndex);
       return;
     }
     if (selectedCell !== null && selectedCell !== destIndex && byDest.has(selectedCell)) {
-      if (baseByIndex.has(destIndex)) {
-        setSelectedCell(destIndex);
-        setComposeError(
-          `dest ${destLabel(destIndex)} already has a pattern — pick an empty cell`
-        );
-        return;
-      }
-      setPicks((prev) => {
-        const moving = prev.find((p) => p.destIndex === selectedCell);
-        if (!moving) return prev;
-        return [
-          ...prev.filter(
-            (p) => p.destIndex !== selectedCell && p.destIndex !== destIndex
-          ),
-          { ...moving, destIndex },
-        ];
-      });
-      setSelectedCell(destIndex);
-      setComposeReport(null);
+      rearrangeDest(selectedCell, destIndex);
       return;
     }
     setSelectedCell(destIndex);
   };
 
   const clearCell = (destIndex: number) => {
-    setPicks((prev) => prev.filter((p) => p.destIndex !== destIndex));
+    setPieces((prev) => prev.filter((p) => p.destIndex !== destIndex));
     if (selectedCell === destIndex) setSelectedCell(null);
     setComposeReport(null);
+    setComposeError(null);
   };
 
   const sampleEstimate = useMemo(
-    () => picks.reduce((n, p) => n + p.pattern.sample_refs, 0),
-    [picks]
+    () => pieces.reduce((n, p) => n + p.pattern.sample_refs, 0),
+    [pieces]
   );
+
+  const diff = useMemo(() => {
+    const copies: { path: string; pattern: string; dest: string }[] = [];
+    const vacates: string[] = [];
+    for (let i = 0; i < 128; i++) {
+      const piece = byDest.get(i);
+      const base = baseByIndex.get(i);
+      if (!cellDiffers(i, piece, base)) continue;
+      if (base) vacates.push(destLabel(i));
+      if (piece) {
+        copies.push({
+          path: piece.origin === "base" ? DEST_BASE_PATH : piece.dumpPath,
+          pattern: piece.pattern.label,
+          dest: destLabel(i),
+        });
+      }
+    }
+    return { copies, vacates };
+  }, [byDest, baseByIndex]);
 
   const exportFresh = async () => {
     if (!templateKind) {
       setComposeError("Baked empty template is missing.");
       return;
     }
-    if (picks.length === 0) {
-      setComposeError("Place at least one pattern on the dest grid.");
+    if (diff.copies.length === 0 && diff.vacates.length === 0) {
+      setComposeError("Nothing differs from dest base — rearrange or place a pattern first.");
       return;
     }
     setComposing(true);
     setComposeError(null);
     setComposeReport(null);
     try {
-      const ordered = [...picks].sort((a, b) => a.destIndex - b.destIndex);
       const res = await fetch("/api/compose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           template: templateKind,
           name: outName,
-          copies: ordered.map((p) => ({
-            path: p.dumpPath,
-            pattern: p.pattern.label,
-            dest: destLabel(p.destIndex),
-          })),
+          copies: diff.copies,
+          vacates: diff.vacates,
         }),
       });
       const data = await res.json();
@@ -351,10 +407,17 @@ export function BuilderApp() {
     }
   };
 
-  const selectedPick = selectedCell !== null ? byDest.get(selectedCell) : undefined;
-  const selectedBase =
-    selectedCell !== null && !selectedPick ? baseByIndex.get(selectedCell) : undefined;
-  const destOccupiedCount = destCatalog?.patterns.length ?? 0;
+  const selectedPiece = selectedCell !== null ? byDest.get(selectedCell) : undefined;
+  const selectedVacated =
+    selectedCell !== null && !selectedPiece && baseByIndex.has(selectedCell);
+  const destOccupiedCount = pieces.length;
+  const diffCount = useMemo(() => {
+    let n = 0;
+    for (let i = 0; i < 128; i++) {
+      if (cellDiffers(i, byDest.get(i), baseByIndex.get(i))) n++;
+    }
+    return n;
+  }, [byDest, baseByIndex]);
 
   return (
     <div className="flex min-h-full flex-col bg-background">
@@ -366,10 +429,10 @@ export function BuilderApp() {
           Browse dumps. Place on the grid. Export a new project.
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          Composer, not an editor. Empty dest cells stay empty (A01 can be blank).
-          Pattern+kit copy only — no kit-only, no live send. Settings-first so
-          samples bind on the box. Restore into disposable RAM; +Drive already
-          holds the files.
+          Composer, not an editor. Drag dest cells to rearrange (vacate or swap).
+          Grey still matches dest base; red is the project differential. Pattern+kit
+          copy only — no kit-only, no live send. Settings-first so samples bind on
+          the box. Restore into disposable RAM; +Drive already holds the files.
         </p>
       </header>
 
@@ -377,13 +440,13 @@ export function BuilderApp() {
         <span>
           {silk("PAT")}{" "}
           <span className="tracking-normal text-foreground">
-            {picks.length}/128
+            {destOccupiedCount}/128
           </span>
         </span>
         <span>
           {silk("KIT")}{" "}
           <span className="tracking-normal text-foreground">
-            {picks.length}/128
+            {destOccupiedCount}/128
           </span>
         </span>
         <span>
@@ -392,15 +455,27 @@ export function BuilderApp() {
             ~{Math.min(sampleEstimate, 128)}/128
           </span>
         </span>
+        <span>
+          {silk("DIFF")}{" "}
+          <span className="tracking-normal text-foreground">{diffCount}</span>
+        </span>
         <span className="text-primary">settings-first</span>
         <span className="min-w-0 flex-1 truncate tracking-normal text-muted-foreground normal-case">
           {held
-            ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → click a dest cell`
-            : selectedPick
-              ? `${destLabel(selectedPick.destIndex)} ← ${selectedPick.dumpName} ${selectedPick.pattern.label}`
-              : selectedBase && selectedCell !== null
-                ? `${destLabel(selectedCell)} dest base · ${selectedBase.kit_name || selectedBase.label}${selectedBase.kit !== null ? ` · kit ${selectedBase.kit}` : ""}`
-                : "click ADD then a dest cell (empty cells are first-class)"}
+            ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → empty dest cell`
+            : selectedPiece && selectedCell !== null
+              ? `${destLabel(selectedPiece.destIndex)} ← ${selectedPiece.dumpName} ${selectedPiece.pattern.label}${
+                  cellDiffers(
+                    selectedCell,
+                    selectedPiece,
+                    baseByIndex.get(selectedCell)
+                  )
+                    ? " · red vs dest base"
+                    : " · matches dest base"
+                }`
+              : selectedVacated && selectedCell !== null
+                ? `${destLabel(selectedCell)} vacated vs dest base (red)`
+                : "drag dest cells to rearrange · grey matches dest base · red is the diff"}
         </span>
       </div>
 
@@ -549,10 +624,11 @@ export function BuilderApp() {
                         e.dataTransfer.setData(
                           "application/json",
                           JSON.stringify({
+                            kind: "catalog",
                             dumpPath: selected.name,
                             dumpName: selected.name.replace(/\.syx$/i, ""),
                             pattern: p,
-                          } satisfies Held)
+                          } satisfies DragPayload)
                         );
                         holdFromCatalog(p);
                       }}
@@ -601,11 +677,14 @@ export function BuilderApp() {
 
         <Card
           onDragOver={(e) => {
-            e.preventDefault();
-            setBaseDrag(true);
+            if (e.dataTransfer.types.includes("Files")) {
+              e.preventDefault();
+              setBaseDrag(true);
+            }
           }}
           onDragLeave={() => setBaseDrag(false)}
           onDrop={(e) => {
+            if (!e.dataTransfer.files.length) return;
             e.preventDefault();
             setBaseDrag(false);
             void importSyx(Array.from(e.dataTransfer.files), "template");
@@ -617,9 +696,11 @@ export function BuilderApp() {
               Pat dest
             </CardTitle>
             <CardDescription>
-              A–H × 1–16. Empty cells stay empty. Base: {templateName}
+              Drag occupied cells to rearrange (swap if target is full). Grey =
+              matches dest base. Red = differs (new, moved, or vacated). Base:{" "}
+              {templateName}
               {templateKind === "custom" ? " (override)" : ""}
-              {destOccupiedCount > 0 ? ` · ${destOccupiedCount} occupied` : " · all empty"}
+              {diffCount > 0 ? ` · ${diffCount} red` : ""}
               . New file only.
             </CardDescription>
           </CardHeader>
@@ -676,33 +757,45 @@ export function BuilderApp() {
                     selectedCell={selectedCell}
                     held={held}
                     onCell={(i) => moveOrSelectCell(i)}
-                    onDropHeld={(i, piece) => placeHeldAt(i, piece)}
+                    onDestDragEnd={() => {
+                      skipCellClick.current = true;
+                      window.setTimeout(() => {
+                        skipCellClick.current = false;
+                      }, 50);
+                    }}
+                    onDropPayload={(i, payload) => {
+                      if (payload.kind === "dest") rearrangeDest(payload.destIndex, i);
+                      else placeHeldAt(i, payload);
+                    }}
                   />
                 ))}
               </div>
             </div>
-            {selectedPick && (
+            {selectedPiece && (
               <div className="flex items-start justify-between gap-2 border border-border bg-muted px-2 py-2 text-xs">
                 <p>
-                  {destLabel(selectedPick.destIndex)} ← {selectedPick.dumpName}{" "}
-                  {selectedPick.pattern.label} · {selectedPick.pattern.kit_name || "unnamed"}
+                  {destLabel(selectedPiece.destIndex)} ← {selectedPiece.dumpName}{" "}
+                  {selectedPiece.pattern.label} · {selectedPiece.pattern.kit_name || "unnamed"}
+                  {selectedPiece.origin === "base" &&
+                  selectedCell !== null &&
+                  matchesBase(selectedPiece, selectedCell)
+                    ? " · grey dest base"
+                    : " · red vs dest base"}
                 </p>
                 <Button
                   size="xs"
                   variant="ghost"
-                  onClick={() => clearCell(selectedPick.destIndex)}
+                  onClick={() => clearCell(selectedPiece.destIndex)}
                 >
                   clear
                 </Button>
               </div>
             )}
-            {selectedBase && selectedCell !== null && !selectedPick && (
-              <div className="border border-border bg-secondary px-2 py-2 text-xs">
+            {selectedVacated && selectedCell !== null && (
+              <div className="border border-primary bg-primary/15 px-2 py-2 text-xs">
                 <p>
-                  {destLabel(selectedCell)} occupied in dest base ·{" "}
-                  {selectedBase.kit_name || selectedBase.label}
-                  {selectedBase.kit !== null ? ` · kit ${selectedBase.kit}` : ""} ·{" "}
-                  {selectedBase.trigs} trigs. Pick an empty cell.
+                  {destLabel(selectedCell)} vacated vs dest base (red empty). Drag
+                  something here or leave empty.
                 </p>
               </div>
             )}
@@ -718,7 +811,7 @@ export function BuilderApp() {
             <Button
               className="rounded-[2px]"
               onClick={() => void exportFresh()}
-              disabled={composing || picks.length === 0}
+              disabled={composing || diffCount === 0}
             >
               {composing ? "Composing…" : "Export new .syx"}
             </Button>
@@ -746,15 +839,17 @@ function BankRow({
   selectedCell,
   held,
   onCell,
-  onDropHeld,
+  onDestDragEnd,
+  onDropPayload,
 }: {
   bank: number;
-  byDest: Map<number, PickRow>;
+  byDest: Map<number, DestPiece>;
   baseByIndex: Map<number, PatternRow>;
   selectedCell: number | null;
   held: Held | null;
   onCell: (i: number) => void;
-  onDropHeld: (i: number, piece: Held) => void;
+  onDestDragEnd: () => void;
+  onDropPayload: (i: number, payload: DragPayload) => void;
 }) {
   const letter = String.fromCharCode(65 + bank);
   return (
@@ -764,50 +859,71 @@ function BankRow({
       </div>
       {Array.from({ length: 16 }, (_, s) => {
         const i = bank * 16 + s;
-        const pick = byDest.get(i);
+        const piece = byDest.get(i);
         const base = baseByIndex.get(i);
         const selected = selectedCell === i;
-        const title = pick
-          ? `${destLabel(i)} ← ${pick.dumpName} ${pick.pattern.label}`
-          : base
-            ? `${destLabel(i)} dest base · ${base.kit_name || base.label}${base.kit !== null ? ` · kit ${base.kit}` : ""}`
+        const differs = cellDiffers(i, piece, base);
+        const vacated = !piece && !!base;
+        const title = piece
+          ? `${destLabel(i)} ← ${piece.dumpName} ${piece.pattern.label}${
+              differs ? " · red vs dest base" : " · matches dest base"
+            }`
+          : vacated
+            ? `${destLabel(i)} vacated vs dest base`
             : `${destLabel(i)} empty`;
-        const label = pick
-          ? (pick.pattern.kit_name || pick.pattern.label).slice(0, 3)
-          : base
-            ? (base.kit_name || base.label).slice(0, 3)
-            : "";
+        const label = piece
+          ? (piece.pattern.kit_name || piece.pattern.label).slice(0, 3)
+          : "";
+        const tone = piece
+          ? differs
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-muted-foreground bg-secondary text-foreground"
+          : vacated
+            ? "border-primary bg-primary/35 text-primary-foreground"
+            : "border-border bg-background text-muted-foreground";
         return (
           <button
             key={i}
             type="button"
+            draggable={!!piece}
             title={title}
             onClick={() => onCell(i)}
+            onDragStart={(e) => {
+              if (!piece) return;
+              e.dataTransfer.setData(
+                "application/json",
+                JSON.stringify({ kind: "dest", destIndex: i } satisfies DragPayload)
+              );
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragEnd={() => onDestDragEnd()}
             onDragOver={(e) => {
               e.preventDefault();
+              e.stopPropagation();
             }}
             onDrop={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               const raw = e.dataTransfer.getData("application/json");
               if (!raw) {
-                if (held) onDropHeld(i, held);
+                if (held) onDropPayload(i, { kind: "catalog", ...held });
                 return;
               }
               try {
-                onDropHeld(i, JSON.parse(raw) as Held);
+                const parsed = JSON.parse(raw) as DragPayload | Held;
+                if ("kind" in parsed && (parsed.kind === "dest" || parsed.kind === "catalog")) {
+                  onDropPayload(i, parsed);
+                } else {
+                  const legacy = parsed as Held;
+                  onDropPayload(i, { kind: "catalog", ...legacy });
+                }
               } catch {
-                if (held) onDropHeld(i, held);
+                if (held) onDropPayload(i, { kind: "catalog", ...held });
               }
             }}
-            className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${
-              pick
-                ? "border-primary bg-primary text-primary-foreground"
-                : base
-                  ? "border-muted-foreground bg-secondary text-foreground"
-                  : "border-border bg-background text-muted-foreground"
-            } ${selected ? "outline outline-1 outline-offset-1 outline-white" : ""} ${
-              held && !pick && !base ? "hover:border-primary" : ""
-            } ${held && base ? "cursor-not-allowed" : ""}`}
+            className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone} ${
+              selected ? "outline outline-1 outline-offset-1 outline-white" : ""
+            } ${held && !piece ? "hover:border-primary" : ""}`}
           >
             {label}
           </button>

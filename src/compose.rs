@@ -139,20 +139,42 @@ fn first_free_kit(dest: &Project) -> Result<u8, String> {
 
 fn dest_kit_for_slot(dest: &Project, dest_pat: u8) -> Result<u8, String> {
     let used = nonempty_pattern_kits(dest);
-    if find_raw(dest, OBJ_KIT, dest_pat).is_none() {
-        return Err(format!(
-            "dest missing kit {} for pattern {}",
-            dest_pat,
-            pattern_label(dest_pat)
-        ));
+    if find_raw(dest, OBJ_KIT, dest_pat).is_some() && !used[dest_pat as usize] {
+        return Ok(dest_pat);
     }
-    if used[dest_pat as usize] {
-        return Err(format!(
-            "dest kit {} is already used by another pattern",
-            dest_pat
-        ));
+    // Nonempty dest-base projects don't keep kit N free for pattern N.
+    first_free_kit(dest)
+}
+
+/// Replace dest pattern `dest_pat` with an empty pattern object (trigs = 0).
+/// Kits are left in place; unused kits become free for later PAT+KIT copies.
+pub fn vacate_pattern(dest: &mut Project, dest_pat: u8) -> Result<(), String> {
+    let Some(cur) = find_raw(dest, OBJ_PATTERN, dest_pat) else {
+        return Err(format!("dest missing pattern {}", pattern_label(dest_pat)));
+    };
+    if count_pattern_trigs(&cur.raw) == 0 {
+        return Ok(());
     }
-    Ok(dest_pat)
+    let empty_raw = dest
+        .objects
+        .iter()
+        .find(|o| {
+            o.obj_type == OBJ_PATTERN
+                && o.obj_nr != u16::from(dest_pat)
+                && count_pattern_trigs(&o.raw) == 0
+        })
+        .map(|o| o.raw.clone())
+        .ok_or_else(|| "no empty dest pattern to use as a vacate donor".to_string())?;
+    let dp = find_raw_mut(dest, OBJ_PATTERN, dest_pat).ok_or_else(|| {
+        format!("dest missing pattern {}", pattern_label(dest_pat))
+    })?;
+    if dp.raw.len() != empty_raw.len() {
+        return Err("dest pattern size mismatch while vacating".into());
+    }
+    dp.raw = empty_raw;
+    dp.obj_nr = u16::from(dest_pat);
+    encode_object(dp)?;
+    Ok(())
 }
 
 fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
@@ -342,6 +364,7 @@ pub fn format_report(
     template: &str,
     out: &str,
     copies: &[CopyReport],
+    vacated: &[u8],
     check: &crate::project::ExportCheck,
     sources_unchanged: bool,
     sample_slots: usize,
@@ -360,7 +383,12 @@ pub fn format_report(
         "  settings_first: {}  sources_unchanged: {}  sample_slots: {sample_slots}/128\n",
         check.settings_first, sources_unchanged
     ));
-    s.push_str("  samples:  fingerprints only; files must already be on +Drive\n\n");
+    s.push_str("  samples:  fingerprints only; files must already be on +Drive\n");
+    if !vacated.is_empty() {
+        let labels: Vec<String> = vacated.iter().copied().map(pattern_label).collect();
+        s.push_str(&format!("  vacate:   {}\n", labels.join(", ")));
+    }
+    s.push('\n');
     for (i, c) in copies.iter().enumerate() {
         s.push_str(&format!(
             "[{}] {} {} + kit {} '{}'  ->  dest {} kit {}\n",
