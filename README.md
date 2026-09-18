@@ -18,6 +18,15 @@ The binary is `target/debug/rytm-builder`.
 
 Keep personal `.syx` dumps out of git (they are gitignored). Point the CLI at a local dumps folder.
 
+## Browse UI (Play 3)
+
+```bash
+cargo build
+cd web && npm install && npm run dev
+```
+
+Local app at http://127.0.0.1:43147 — catalog dumps, pick patterns, export a new `.syx` through this same CLI. Restore model unchanged: disposable RAM project, delete if bad.
+
 ## Catalog a dump
 
 ```bash

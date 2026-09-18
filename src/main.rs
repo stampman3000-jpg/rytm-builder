@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 fn usage() -> ! {
     eprintln!(
         "rytm-builder — compose a fresh Analog Rytm project .syx (no overwrite, no MIDI)\n\n\
-         rytm-builder catalog <dump.syx>\n\
+         rytm-builder catalog [--json] <dump.syx>\n\
          rytm-builder compose --template <empty.syx> --out <new.syx> --copy <dump.syx:A03> [...]\n\
              [--report <report.txt>]\n"
     );
@@ -53,9 +53,15 @@ fn run() -> Result<(), String> {
     let cmd = args.remove(0);
     match cmd.as_str() {
         "catalog" => {
+            let json = args.iter().any(|a| a == "--json");
+            args.retain(|a| a != "--json");
             let dump = args.first().ok_or("catalog needs a dump path")?;
             let p = load_project(&PathBuf::from(dump))?;
-            catalog::print_catalog(&p);
+            if json {
+                catalog::print_catalog_json(&p)?;
+            } else {
+                catalog::print_catalog(&p);
+            }
         }
         "compose" => {
             let template =

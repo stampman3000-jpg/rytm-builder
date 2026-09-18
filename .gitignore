@@ -2,3 +2,5 @@
 **/*.rs.bk
 .DS_Store
 *.syx
+web/node_modules
+web/.next
