@@ -36,13 +36,6 @@ function silk(text: string) {
 }
 
 function kindBadge(kind: DumpInfo["kind"]) {
-  if (kind === "template") {
-    return (
-      <Badge variant="secondary" className="rounded-[2px] tracking-wide">
-        empty template
-      </Badge>
-    );
-  }
   if (kind === "composed") {
     return (
       <Badge variant="outline" className="rounded-[2px] tracking-wide">
@@ -55,10 +48,15 @@ function kindBadge(kind: DumpInfo["kind"]) {
 
 export function BuilderApp() {
   const [dumps, setDumps] = useState<DumpInfo[]>([]);
-  const [dumpsDir, setDumpsDir] = useState<string>("");
-  const [template, setTemplate] = useState<string | null>(null);
+  const [templateKind, setTemplateKind] = useState<"baked" | "custom">("baked");
+  const [templateName, setTemplateName] = useState("Baked empty");
   const [listError, setListError] = useState<string | null>(null);
   const [loadingList, setLoadingList] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [sourceDrag, setSourceDrag] = useState(false);
+  const [baseDrag, setBaseDrag] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const baseInput = useRef<HTMLInputElement>(null);
 
   const [selected, setSelected] = useState<DumpInfo | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -86,23 +84,71 @@ export function BuilderApp() {
     try {
       const res = await fetch("/api/dumps");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "could not list dumps");
+      if (!res.ok) throw new Error(data.error || "could not list library");
       setDumps(data.dumps);
-      setDumpsDir(data.dir);
-      setTemplate(data.template);
+      if (data.template?.kind) setTemplateKind(data.template.kind);
+      if (data.template?.name) setTemplateName(data.template.name);
       const firstLib = (data.dumps as DumpInfo[]).find((d) => d.kind === "library");
       setSelected((prev) => {
-        if (prev && (data.dumps as DumpInfo[]).some((d) => d.path === prev.path)) {
+        if (prev && (data.dumps as DumpInfo[]).some((d) => d.name === prev.name)) {
           return prev;
         }
-        return firstLib ?? null;
+        return firstLib ?? (data.dumps as DumpInfo[])[0] ?? null;
       });
     } catch (e) {
-      setListError(e instanceof Error ? e.message : "could not list dumps");
+      setListError(e instanceof Error ? e.message : "could not list library");
     } finally {
       setLoadingList(false);
     }
   }, []);
+
+  const importSyx = async (files: File[], into: "library" | "template") => {
+    const syx = files.filter((f) => f.name.toLowerCase().endsWith(".syx"));
+    if (syx.length === 0) {
+      setListError("Drop .syx whole-project dumps.");
+      return;
+    }
+    setImporting(true);
+    setListError(null);
+    try {
+      if (into === "template") {
+        const first = syx[0];
+        if (!first) return;
+        const fd = new FormData();
+        fd.append("file", first, first.name);
+        const res = await fetch("/api/template", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "could not set dest base");
+        setTemplateKind("custom");
+        setTemplateName(data.name || "Dropped dest base");
+      } else {
+        const fd = new FormData();
+        for (const f of syx) fd.append("files", f, f.name);
+        const res = await fetch("/api/library", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "could not import");
+        await loadDumps();
+        if (data.skipped?.length) {
+          setListError(data.skipped.join("; "));
+        }
+      }
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : "import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const resetTemplate = async () => {
+    const res = await fetch("/api/template", { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) {
+      setComposeError(data.error || "could not reset dest base");
+      return;
+    }
+    setTemplateKind("baked");
+    setTemplateName(data.name || "Baked empty");
+  };
 
   useEffect(() => {
     void loadDumps();
@@ -117,7 +163,7 @@ export function BuilderApp() {
     setLoadingCatalog(true);
     setCatalogError(null);
     setCatalog(null);
-    fetch(`/api/catalog?path=${encodeURIComponent(selected.path)}`)
+    fetch(`/api/catalog?name=${encodeURIComponent(selected.name)}`)
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "catalog failed");
@@ -140,7 +186,7 @@ export function BuilderApp() {
   const holdFromCatalog = (pattern: PatternRow) => {
     if (!selected) return;
     setHeld({
-      dumpPath: selected.path,
+      dumpPath: selected.name,
       dumpName: selected.name.replace(/\.syx$/i, ""),
       pattern,
     });
@@ -204,8 +250,8 @@ export function BuilderApp() {
   );
 
   const exportFresh = async () => {
-    if (!template) {
-      setComposeError("No empty template in the dumps folder (need Untitled-4.syx).");
+    if (!templateKind) {
+      setComposeError("Baked empty template is missing.");
       return;
     }
     if (picks.length === 0) {
@@ -221,7 +267,7 @@ export function BuilderApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template,
+          template: templateKind,
           name: outName,
           copies: ordered.map((p) => ({
             path: p.dumpPath,
@@ -290,34 +336,75 @@ export function BuilderApp() {
       </div>
 
       <div className="grid flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_minmax(0,1.4fr)] md:p-4">
-        <Card>
+        <Card
+          onDragOver={(e) => {
+            e.preventDefault();
+            setSourceDrag(true);
+          }}
+          onDragLeave={() => setSourceDrag(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setSourceDrag(false);
+            void importSyx(Array.from(e.dataTransfer.files), "library");
+          }}
+          className={sourceDrag ? "border-primary" : ""}
+        >
           <CardHeader className="border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
               Source
             </CardTitle>
-            <CardDescription className="text-xs break-all">
-              {dumpsDir || "looking for dumps folder…"}
+            <CardDescription className="text-xs">
+              Drop .syx dumps here. {dumps.length} in library.
+              {importing ? " Importing…" : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 pt-3">
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".syx"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const list = e.target.files;
+                if (list) void importSyx(Array.from(list), "library");
+                e.target.value = "";
+              }}
+            />
             {loadingList && (
-              <p className="text-sm text-muted-foreground">Listing .syx files…</p>
+              <p className="text-sm text-muted-foreground">Listing library…</p>
             )}
             {listError && (
               <p className="text-sm text-destructive">{listError}</p>
             )}
-            {!loadingList && !listError && dumps.length === 0 && (
+            {!loadingList && dumps.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                No .syx files in that folder. Put Untitled.syx, Untitled-1.syx,
-                and Untitled-4.syx there.
+                Library is empty. Drop Analog Rytm whole-project .syx files, or{" "}
+                <button
+                  type="button"
+                  className="text-primary underline"
+                  onClick={() => fileInput.current?.click()}
+                >
+                  choose files
+                </button>
+                .
               </p>
+            )}
+            {dumps.length > 0 && (
+              <button
+                type="button"
+                className="mb-2 text-xs text-muted-foreground underline"
+                onClick={() => fileInput.current?.click()}
+              >
+                Add more .syx
+              </button>
             )}
             <ScrollArea className="h-[min(48vh,380px)]">
               <ul className="flex flex-col gap-px pr-2">
                 {dumps.map((d) => {
-                  const active = selected?.path === d.path;
+                  const active = selected?.name === d.name;
                   return (
-                    <li key={d.path}>
+                    <li key={d.name}>
                       <button
                         type="button"
                         onClick={() => setSelected(d)}
@@ -393,7 +480,7 @@ export function BuilderApp() {
                         e.dataTransfer.setData(
                           "application/json",
                           JSON.stringify({
-                            dumpPath: selected.path,
+                            dumpPath: selected.name,
                             dumpName: selected.name.replace(/\.syx$/i, ""),
                             pattern: p,
                           } satisfies Held)
@@ -443,17 +530,54 @@ export function BuilderApp() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          onDragOver={(e) => {
+            e.preventDefault();
+            setBaseDrag(true);
+          }}
+          onDragLeave={() => setBaseDrag(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setBaseDrag(false);
+            void importSyx(Array.from(e.dataTransfer.files), "template");
+          }}
+          className={baseDrag ? "border-primary" : ""}
+        >
           <CardHeader className="border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
               Pat dest
             </CardTitle>
             <CardDescription>
-              A–H × 1–16. Empty cells stay empty. Template{" "}
-              {template ? template.split("/").pop() : "missing"}. New file only.
+              A–H × 1–16. Empty cells stay empty. Base: {templateName}
+              {templateKind === "custom" ? " (override)" : ""}. New file only.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-3 pt-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <input
+                ref={baseInput}
+                type="file"
+                accept=".syx"
+                className="hidden"
+                onChange={(e) => {
+                  const list = e.target.files;
+                  if (list) void importSyx(Array.from(list), "template");
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="underline"
+                onClick={() => baseInput.current?.click()}
+              >
+                Drop or choose a .syx dest base
+              </button>
+              {templateKind === "custom" && (
+                <button type="button" className="underline" onClick={() => void resetTemplate()}>
+                  Reset to baked empty
+                </button>
+              )}
+            </div>
             <div className="overflow-x-auto">
               <div
                 className="grid gap-px"

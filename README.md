@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — catalog dumps, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), export a new `.syx` through this same CLI. Restore model unchanged: disposable RAM project, delete if bad.
+Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), export a new `.syx`. Default dest base is the baked empty Untitled-4 template. Restore model unchanged: disposable RAM project, delete if bad.
 
 ## Catalog a dump
 

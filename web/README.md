@@ -15,12 +15,9 @@ npm run dev
 
 Opens on [http://127.0.0.1:43147](http://127.0.0.1:43147).
 
-By default it reads dumps from the agent-store dumps folder. Override with:
+Drop `.syx` dumps onto SOURCE. They are copied into an app-owned library (`~/Library/Application Support/rytm-builder/library`), not the Cursor store. Dest base defaults to the baked empty `Untitled-4` template; drop/choose another project to override.
 
 ```bash
-export RYTM_DUMPS=/path/to/your/dumps
 export RYTM_BUILDER=/path/to/rytm-builder
 export RYTM_ROOT=/path/to/this/repo
 ```
-
-Put `Untitled-4.syx` (empty template) plus library dumps in that folder. Export writes a new `.syx` + `.txt` there and refuses to overwrite.

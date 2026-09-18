@@ -27,7 +27,7 @@ export type DumpInfo = {
   name: string;
   path: string;
   bytes: number;
-  kind: "template" | "library" | "composed";
+  kind: "library" | "composed";
 };
 
 export type PickRow = {
