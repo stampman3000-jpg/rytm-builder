@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Dev binds 0.0.0.0; Preview opens 127.0.0.1 and Next treats that as cross-origin without this.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  agentRules: false,
 };
 
 export default nextConfig;
