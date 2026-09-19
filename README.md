@@ -1,6 +1,6 @@
 # rytm-builder
 
-Compose a **new** Analog Rytm whole-project `.syx` from a library of dumps. This is a builder, not an editor: source files stay read-only, and every run writes a fresh file.
+Compose and stage Analog Rytm pattern and kit changes from a library of dumps, then export a fresh whole-project or differential `.syx`. Source files stay read-only; the working destination is changed only in memory, and every run writes a new file.
 
 Samples must already live on the Rytm +Drive. The builder only copies 16-byte fingerprints so restored kits bind to those files. There is no USB/MIDI send.
 

@@ -835,7 +835,7 @@ export function BuilderApp() {
             ? "Kit dest is the kit list (00–127), not the pattern grid. Drop overwrites that kit slot only — patterns keep their kit numbers and pick up the new analog and samples. Grey matches dest base; red is the diff. No USB."
             : workMode === "pat"
               ? "Pattern dest is the A–H grid. Drop overwrites that pattern slot only and keeps the dest kit number — analog stays put. Grey matches dest base; red is the diff. No USB."
-              : "Composer, not an editor. Drag dest cells to rearrange (vacate or swap). Grey still matches dest base; red is the project differential. Pattern+kit copy on this tab. Settings-first so samples bind on the box. Restore into disposable RAM; +Drive already holds the files."}
+              : "Offline project composer. Stage pattern+kit changes on the dest grid, compare them with the base, then export a fresh settings-first file. Sources stay read-only; the working destination is only changed in memory."}
         </p>
         <div className="mode-rail mt-4 flex max-w-lg">
           <Button

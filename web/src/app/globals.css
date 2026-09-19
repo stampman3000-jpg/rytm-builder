@@ -124,10 +124,12 @@
 
 .app-shell {
   font-variant-numeric: tabular-nums;
+  background: #0b0b0b;
 }
 
 .instrument-header {
-  background: #0e0e0e;
+  background: #101010;
+  border-bottom-color: #303030 !important;
 }
 
 .brand-mark {
@@ -152,13 +154,14 @@
 }
 
 .mode-rail {
-  border-bottom: 1px solid #363636;
+  border: 1px solid #303030;
+  background: #171717;
   gap: 0;
 }
 
 .mode-tab {
   position: relative;
-  min-width: 6.5rem;
+  min-width: 7rem;
   height: 2.35rem;
   border: 0 !important;
   border-radius: 0 !important;
@@ -184,10 +187,15 @@
 }
 
 .mode-tab-active {
+  background: #2a2a2a !important;
   color: #f4f4f4 !important;
 }
 
 .mode-tab-active::after {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
   background: var(--primary);
 }
 
@@ -201,13 +209,16 @@
 }
 
 .panel {
+  border-radius: 0 !important;
   border-color: #2d2d2d;
-  background: #121212;
+  background: #111111;
+  border-top: 2px solid #313131;
+  box-shadow: 0 1px 0 #070707;
 }
 
 .panel-header {
-  min-height: 3.7rem;
-  background: #151515;
+  min-height: 3.9rem;
+  background: #111111;
   border-bottom-color: #2d2d2d !important;
 }
 
@@ -226,7 +237,8 @@
 }
 
 .panel-dragging {
-  border-color: var(--primary);
+  border-color: #4b4b4b;
+  border-top-color: var(--primary);
 }
 
 .library-row,
@@ -255,8 +267,13 @@
   color: #737373;
 }
 
+.slot-grid > div {
+  gap: 2px;
+}
+
 .slot-button {
-  border-color: #353535 !important;
+  border-color: #383838 !important;
+  border-radius: 1px !important;
   box-shadow: none !important;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -267,12 +284,20 @@
 
 .slot-button:hover {
   border-color: #8b8b8b !important;
+  transform: translateY(-1px);
 }
 
 .kit-dest-row {
   min-height: 2.1rem;
   border-color: #353535 !important;
   font-size: 0.78rem;
+}
+
+.kit-dest-row > span:first-child {
+  color: #888888;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .kit-dest-row:hover {

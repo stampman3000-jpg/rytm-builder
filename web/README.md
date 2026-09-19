@@ -1,6 +1,6 @@
 # rytm-builder web
 
-Local browse UI for Analog Rytm whole-project `.syx` dumps. It catalogs patterns and kits, then calls the `rytm-builder` CLI to export a **new** settings-first project. Pattern dest is an A–H × 1–16 grid; empty cells stay empty. **PAT+KIT** is the default tab. **KIT** dest is a dual-column kit list (slots 00–127) and overwrites kit objects in place (no pattern write). **PAT** dest is the pattern grid and overwrites pattern objects in place (dest kit numbers stay). It does not edit dumps in place and does not talk to the device.
+Local staging UI for Analog Rytm whole-project `.syx` dumps. It catalogs patterns and kits, lets you stage changes against a destination base, then calls the `rytm-builder` CLI to export a **new** settings-first project or differential. Pattern dest is an A–H × 1–16 grid; empty cells stay empty. **PAT+KIT** is the default tab. **KIT** dest is a dual-column kit list (slots 00–127) and overwrites kit objects in place (no pattern write). **PAT** dest is the pattern grid and overwrites pattern objects in place (dest kit numbers stay). Source files are read-only, destination changes are in-memory until export, and the app never talks to the device.
 
 ## Run
 
