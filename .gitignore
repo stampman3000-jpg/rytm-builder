@@ -5,3 +5,8 @@
 !web/templates/*.syx
 web/node_modules
 web/.next
+web/dist
+web/tsconfig.tsbuildinfo
+dist/
+src-tauri/gen
+src-tauri/target

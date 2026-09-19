@@ -5,6 +5,18 @@ edition = "2021"
 description = "Compose a fresh Analog Rytm whole-project .syx from a dump library (builder, not editor)."
 license = "MIT"
 
+[lib]
+name = "rytm_builder"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rytm-builder"
+path = "src/main.rs"
+
+[workspace]
+members = ["src-tauri"]
+resolver = "2"
+
 [dependencies]
 # rytm-sys pulls an unbound `home`; 0.5.12 needs edition2024 / newer rustc.
 home = "=0.5.9"

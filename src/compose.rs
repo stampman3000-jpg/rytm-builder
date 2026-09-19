@@ -1,9 +1,11 @@
 use crate::layout::*;
 use crate::project::{
-    count_pattern_trigs, encode_object, find_raw, find_raw_mut, kit_sample_nrs, pattern_kit_number,
-    Project,
+    collect_edits, count_pattern_trigs, encode_object, find_raw, find_raw_mut, kit_sample_nrs,
+    load_project, md5_file, pattern_kit_number, sample_slots_used, write_objects_syx,
+    write_settings_first, Project,
 };
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 pub struct CopySpec {
     pub src_path: String,
@@ -752,6 +754,169 @@ pub fn format_edits_lines(
         "  restore edits onto dest-base already in RAM (not empty). This tool never talks USB.\n",
     );
     s
+}
+
+pub struct ComposeSession {
+    pub template: PathBuf,
+    pub out: Option<PathBuf>,
+    pub edits_out: Option<PathBuf>,
+    pub report: Option<PathBuf>,
+    pub copies: Vec<CopySpec>,
+    pub vacates: Vec<u8>,
+    pub kit_copies: Vec<CopySpec>,
+    pub kit_vacates: Vec<u8>,
+    pub pattern_copies: Vec<CopySpec>,
+}
+
+pub struct ComposeOutcome {
+    pub text: String,
+    pub out: Option<PathBuf>,
+    pub edits_out: Option<PathBuf>,
+    pub out_md5: Option<String>,
+}
+
+fn snapshot_files(paths: &[PathBuf]) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    for p in paths {
+        out.push((p.display().to_string(), md5_file(p)?));
+    }
+    Ok(out)
+}
+
+/// In-process compose. Same rules as the CLI: settings-first, no overwrite of `--out`, no USB.
+pub fn compose_session(job: ComposeSession) -> Result<ComposeOutcome, String> {
+    if job.copies.is_empty()
+        && job.vacates.is_empty()
+        && job.kit_copies.is_empty()
+        && job.kit_vacates.is_empty()
+        && job.pattern_copies.is_empty()
+    {
+        return Err(
+            "compose needs at least one --copy, --vacate, --copy-kit, --vacate-kit, or --copy-pattern"
+                .into(),
+        );
+    }
+    if job.out.is_none() && job.edits_out.is_none() {
+        return Err("compose needs --out and/or --edits-out".into());
+    }
+    if !job.template.is_file() {
+        return Err(format!("template not found: {}", job.template.display()));
+    }
+    if let Some(p) = &job.out {
+        if p.exists() {
+            return Err(format!(
+                "output already exists: {} (choose a new name)",
+                p.display()
+            ));
+        }
+    }
+    if let Some(p) = &job.edits_out {
+        if p.exists() {
+            return Err(format!(
+                "edits output already exists: {} (choose a new name)",
+                p.display()
+            ));
+        }
+    }
+    let mut watched: Vec<PathBuf> = vec![job.template.clone()];
+    for spec in &job.copies {
+        watched.push(PathBuf::from(&spec.src_path));
+    }
+    for spec in &job.kit_copies {
+        watched.push(PathBuf::from(&spec.src_path));
+    }
+    for spec in &job.pattern_copies {
+        watched.push(PathBuf::from(&spec.src_path));
+    }
+    let before = snapshot_files(&watched)?;
+    let orig = load_project(&job.template)?;
+    let mut dest = orig.clone();
+    dest.path = orig.path.clone();
+    let mut vacated = Vec::new();
+    for idx in &job.vacates {
+        vacate_pattern(&mut dest, *idx)?;
+        vacated.push(*idx);
+    }
+    let mut vacated_kits = Vec::new();
+    for idx in &job.kit_vacates {
+        vacate_kit(&mut dest, *idx)?;
+        vacated_kits.push(*idx);
+    }
+    let mut reports = Vec::new();
+    for spec in &job.copies {
+        let src = load_project(Path::new(&spec.src_path))?;
+        let r = copy_pattern_kit(&src, &mut dest, spec.pattern, spec.dest)?;
+        reports.push(r);
+    }
+    let mut kit_reports = Vec::new();
+    for spec in &job.kit_copies {
+        let src = load_project(Path::new(&spec.src_path))?;
+        let r = copy_kit(&src, &mut dest, spec.pattern, spec.dest)?;
+        kit_reports.push(r);
+    }
+    let mut pattern_reports = Vec::new();
+    for spec in &job.pattern_copies {
+        let src = load_project(Path::new(&spec.src_path))?;
+        let r = copy_pattern(&src, &mut dest, spec.pattern, spec.dest)?;
+        pattern_reports.push(r);
+    }
+    let mut out_label = String::from("(none)");
+    let mut check_opt = None;
+    let mut out_md5 = None;
+    if let Some(p) = &job.out {
+        let check = write_settings_first(&dest, p)?;
+        out_label = p.display().to_string();
+        out_md5 = Some(check.md5.clone());
+        check_opt = Some(check);
+    }
+    let mut edits_block = String::new();
+    let mut edits_check = None;
+    if let Some(p) = &job.edits_out {
+        let objs = collect_edits(&orig, &dest)?;
+        let echeck = write_objects_syx(&objs, p)?;
+        edits_block = format_edits_lines(&p.display().to_string(), &echeck, &objs);
+        edits_check = Some(echeck);
+    }
+    let after = snapshot_files(&watched)?;
+    let sources_unchanged = before == after;
+    if !sources_unchanged {
+        return Err(
+            "a source or template file changed on disk during compose — originals must stay untouched"
+                .into(),
+        );
+    }
+    let check_ref = check_opt
+        .as_ref()
+        .or(edits_check.as_ref())
+        .expect("compose needs --out and/or --edits-out");
+    let mut text = format_report(
+        &job.template.display().to_string(),
+        &out_label,
+        &reports,
+        &vacated,
+        &kit_reports,
+        &vacated_kits,
+        &pattern_reports,
+        check_ref,
+        sources_unchanged,
+        sample_slots_used(&dest),
+    );
+    if !edits_block.is_empty() {
+        text.push_str(&edits_block);
+        text.push('\n');
+    }
+    if let Some(rp) = &job.report {
+        if rp.exists() {
+            return Err(format!("report path exists: {}", rp.display()));
+        }
+        std::fs::write(rp, &text).map_err(|e| format!("write report: {e}"))?;
+    }
+    Ok(ComposeOutcome {
+        text,
+        out: job.out,
+        edits_out: job.edits_out,
+        out_md5,
+    })
 }
 
 #[cfg(test)]

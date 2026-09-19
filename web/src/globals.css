@@ -54,6 +54,7 @@
 }
 
 :root {
+  --font-plex-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --background: #0a0a0a;
   --foreground: #f4f4f4;
   --card: #141414;

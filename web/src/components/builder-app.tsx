@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +19,15 @@ import type {
   PatternRow,
 } from "@/lib/types";
 import { DEST_BASE_PATH } from "@/lib/types";
+import {
+  catalogDest,
+  catalogDump,
+  composeExport,
+  importLibrary,
+  listLibrary,
+  resetDestBase,
+  setDestBase,
+} from "@/lib/api";
 
 type WorkMode = "patkit" | "kit" | "pat";
 
@@ -248,9 +255,7 @@ export function BuilderApp() {
     setLoadingDest(true);
     setDestError(null);
     try {
-      const res = await fetch("/api/catalog?dest=1");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "could not catalog dest base");
+      const data = await catalogDest();
       applyDestTemplate(data);
     } catch (e) {
       setDestError(e instanceof Error ? e.message : "could not catalog dest base");
@@ -263,9 +268,7 @@ export function BuilderApp() {
     setLoadingList(true);
     setListError(null);
     try {
-      const res = await fetch("/api/dumps");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "could not list library");
+      const data = await listLibrary();
       setDumps(data.dumps);
       if (data.template?.kind) setTemplateKind(data.template.kind);
       if (data.template?.name) setTemplateName(data.template.name);
@@ -296,18 +299,10 @@ export function BuilderApp() {
         const first = syx[0];
         if (!first) return;
         setLoadingDest(true);
-        const fd = new FormData();
-        fd.append("file", first, first.name);
-        const res = await fetch("/api/template", { method: "POST", body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "could not set dest base");
+        const data = await setDestBase(first);
         applyDestTemplate(data);
       } else {
-        const fd = new FormData();
-        for (const f of syx) fd.append("files", f, f.name);
-        const res = await fetch("/api/library", { method: "POST", body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "could not import");
+        const data = await importLibrary(syx);
         await loadDumps();
         if (data.skipped?.length) {
           setListError(data.skipped.join("; "));
@@ -322,13 +317,12 @@ export function BuilderApp() {
   };
 
   const resetTemplate = async () => {
-    const res = await fetch("/api/template", { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok) {
-      setComposeError(data.error || "could not reset dest base");
-      return;
+    try {
+      const data = await resetDestBase();
+      applyDestTemplate(data);
+    } catch (e) {
+      setComposeError(e instanceof Error ? e.message : "could not reset dest base");
     }
-    applyDestTemplate(data);
   };
 
   useEffect(() => {
@@ -348,10 +342,8 @@ export function BuilderApp() {
     setLoadingCatalog(true);
     setCatalogError(null);
     setCatalog(null);
-    fetch(`/api/catalog?name=${encodeURIComponent(selected.name)}`)
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "catalog failed");
+    catalogDump(selected.name)
+      .then((data) => {
         if (!cancelled) setCatalog(data);
       })
       .catch((e) => {
@@ -714,52 +706,40 @@ export function BuilderApp() {
     setComposeError(null);
     setComposeReport(null);
     try {
-      const res = await fetch("/api/compose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          workMode === "kit"
+      const data = await composeExport(
+        workMode === "kit"
+          ? {
+              template: templateKind,
+              name: outName,
+              mode,
+              kitCopies: kitDiff.copies,
+              kitVacates: kitDiff.vacates,
+            }
+          : workMode === "pat"
             ? {
                 template: templateKind,
                 name: outName,
                 mode,
-                kitCopies: kitDiff.copies,
-                kitVacates: kitDiff.vacates,
+                patternCopies: patDiff.copies,
+                vacates: patDiff.vacates,
               }
-            : workMode === "pat"
-              ? {
-                  template: templateKind,
-                  name: outName,
-                  mode,
-                  patternCopies: patDiff.copies,
-                  vacates: patDiff.vacates,
-                }
-              : {
-                  template: templateKind,
-                  name: outName,
-                  mode,
-                  copies: diff.copies,
-                  vacates: diff.vacates,
-                }
-        ),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "compose failed");
-      if (data.out) {
-        const fileRes = await fetch(`/api/exports/${encodeURIComponent(data.out)}`);
-        if (!fileRes.ok) {
-          throw new Error("composed, but download failed — pick a new name and retry");
-        }
-        const blob = await fileRes.blob();
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = data.out as string;
-        a.click();
-        URL.revokeObjectURL(a.href);
+            : {
+                template: templateKind,
+                name: outName,
+                mode,
+                copies: diff.copies,
+                vacates: diff.vacates,
+              }
+      );
+      if (data.savedAs) {
         setComposeReport(
           mode === "edits"
-            ? `Downloaded ${data.out}. Restore onto dest-base already in RAM.`
-            : `Downloaded ${data.out}. Restore as a whole project into empty/disposable RAM.`
+            ? `Saved ${data.out} to ${data.savedAs}. Restore onto dest-base already in RAM.`
+            : `Saved ${data.out} to ${data.savedAs}. Restore as a whole project into empty/disposable RAM.`
+        );
+      } else {
+        setComposeReport(
+          `Composed ${data.out} in Application Support/rytm-builder/exports (Save As cancelled). Restore the same way — this app never talks USB.`
         );
       }
       await loadDumps();
@@ -1479,9 +1459,10 @@ export function BuilderApp() {
               />
             </label>
             <p className="export-note text-xs text-muted-foreground">
-              Downloads a .syx. This app never talks to the Rytm — receive the
-              file in your sysex editor. Project = whole dump into empty RAM.
-              Edits = red slots only onto dest-base already in RAM.{" "}
+              Save As a .syx (Downloads by default). This app never talks to
+              the Rytm — receive the file in your sysex editor. Project = whole
+              dump into empty RAM. Edits = red slots only onto dest-base already
+              in RAM.{" "}
               {workMode === "kit"
                 ? "This tab writes kit objects only (pattern kit numbers stay put)."
                 : workMode === "pat"

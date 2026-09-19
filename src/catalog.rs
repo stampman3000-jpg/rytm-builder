@@ -10,7 +10,7 @@ fn out(line: impl std::fmt::Display) -> bool {
     writeln!(io::stdout(), "{line}").is_ok()
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct PatternRow {
     pub label: String,
     pub index: u8,
@@ -21,7 +21,7 @@ pub struct PatternRow {
     pub smp_nr_plocks: u32,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct KitRow {
     pub index: u8,
     pub name: String,
@@ -29,7 +29,7 @@ pub struct KitRow {
     pub sample_nrs: Vec<u8>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct Catalog {
     pub file: String,
     pub messages: usize,

@@ -6,7 +6,30 @@ Samples must already live on the Rytm +Drive. The builder only copies 16-byte fi
 
 Firmware target: **AR 1.70 / v5** object sizes (same as Johnny’s MK1 dumps).
 
-## Build
+## Mac app (double-click)
+
+Unsigned `.app` (right-click → Open the first time). Compose runs in-process; the window is a webview, not a hidden Next server.
+
+```bash
+cd web && npm install && cd ..
+npm --prefix web run desktop:build
+```
+
+That writes:
+
+- `target/release/bundle/macos/rytm-builder.app`
+- `target/release/bundle/dmg/rytm-builder_0.1.0_*.dmg`
+
+A copy is usually placed on the Desktop after a local build. Library dumps stay in `~/Library/Application Support/rytm-builder/library`. **Download project** / **Download edits** open Save As (Downloads by default) and also keep a copy under `Application Support/rytm-builder/exports`.
+
+Dev window (same engine, not a website):
+
+```bash
+cd web && npm install && cd ..
+npm --prefix web run desktop
+```
+
+## CLI
 
 Needs Rust 1.83 (or similar; not edition 2024). From this directory:
 
@@ -18,14 +41,9 @@ The binary is `target/debug/rytm-builder`.
 
 Keep personal `.syx` dumps out of git (they are gitignored). Point the CLI at a local dumps folder.
 
-## Browse UI (Play 3)
+## Tabs
 
-```bash
-cargo build
-cd web && npm install && npm run dev
-```
-
-Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), switch to **KIT** for dest kit slots 00–127, or **PAT** to overwrite dest pattern slots while keeping dest kit numbers. Drag dest cells/rows to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). Kit-tab edits omit pattern objects; pattern-tab edits omit unchanged kits. This tool never talks USB. Restore model: receive the file in a sysex editor.
+Drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), switch to **KIT** for dest kit slots 00–127, or **PAT** to overwrite dest pattern slots while keeping dest kit numbers. Drag dest cells/rows to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). Kit-tab edits omit pattern objects; pattern-tab edits omit unchanged kits. This tool never talks USB. Restore model: receive the file in a sysex editor.
 
 ## Catalog a dump
 
@@ -94,7 +112,7 @@ This app never talks to the device. Receive the downloaded `.syx` in Transfer / 
 
 ## What this version does not do
 
-No live USB, no firmware SysEx, no Transfer `.arpj`, no sample upload, no song editing, no in-place project surgery, no sample names.
+No live USB, no firmware SysEx, no Transfer `.arpj`, no sample upload, no song editing, no in-place project surgery, no sample names, no Windows `.exe` yet.
 
 ## Proven fixture (Play 1)
 
