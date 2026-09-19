@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Textarea } from "@/components/ui/textarea";
 import type {
   Catalog,
   DestKitPiece,
@@ -746,7 +745,6 @@ export function BuilderApp() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "compose failed");
-      setComposeReport(data.text);
       if (data.out) {
         const fileRes = await fetch(`/api/exports/${encodeURIComponent(data.out)}`);
         if (!fileRes.ok) {
@@ -758,6 +756,11 @@ export function BuilderApp() {
         a.download = data.out as string;
         a.click();
         URL.revokeObjectURL(a.href);
+        setComposeReport(
+          mode === "edits"
+            ? `Downloaded ${data.out}. Restore onto dest-base already in RAM.`
+            : `Downloaded ${data.out}. Restore as a whole project into empty/disposable RAM.`
+        );
       }
       await loadDumps();
     } catch (e) {
@@ -1510,11 +1513,7 @@ export function BuilderApp() {
               <p className="text-sm text-destructive">{composeError}</p>
             )}
             {composeReport && (
-              <Textarea
-                readOnly
-                className="min-h-40 rounded-[2px] font-sans text-xs"
-                value={composeReport}
-              />
+              <p className="text-sm text-muted-foreground">{composeReport}</p>
             )}
           </CardContent>
         </Card>
