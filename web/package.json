@@ -9,7 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 1420 --strictPort",
     "tauri": "tauri",
     "desktop": "tauri dev",
-    "desktop:build": "tauri build --bundles app,dmg"
+    "desktop:build": "tauri build --bundles app,dmg --target universal-apple-darwin"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

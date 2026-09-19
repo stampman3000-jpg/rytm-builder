@@ -15,12 +15,12 @@ cd web && npm install && cd ..
 npm --prefix web run desktop:build
 ```
 
-That writes:
+That writes a **universal** `.app` (Apple Silicon + Intel) and a `.dmg`:
 
-- `target/release/bundle/macos/rytm-builder.app`
-- `target/release/bundle/dmg/rytm-builder_0.1.0_*.dmg`
+- `target/universal-apple-darwin/release/bundle/macos/rytm-builder.app`
+- `target/universal-apple-darwin/release/bundle/dmg/`
 
-A copy is usually placed on the Desktop after a local build. Library dumps stay in `~/Library/Application Support/rytm-builder/library`. **Download project** / **Download edits** open Save As (Downloads by default) and also keep a copy under `Application Support/rytm-builder/exports`.
+macOS **10.15 Catalina** is the claimed floor on Intel. Apple Silicon already needs Big Sur. Mojave and older are not a goal. A copy is usually placed on the Desktop after a local build. Library dumps stay in `~/Library/Application Support/rytm-builder/library`. **Download project** / **Download edits** open Save As (Downloads by default) and also keep a copy under `Application Support/rytm-builder/exports`.
 
 Dev window (same engine, not a website):
 

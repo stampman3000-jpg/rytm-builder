@@ -40,7 +40,7 @@
     },
     "macOS": {
       "signingIdentity": "-",
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "10.15"
     },
     "category": "Music",
     "shortDescription": "Compose Analog Rytm pattern and kit .syx files",

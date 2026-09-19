@@ -9,10 +9,10 @@ From the repo root:
 ```bash
 cd web && npm install && cd ..
 npm --prefix web run desktop          # tauri dev
-npm --prefix web run desktop:build    # unsigned .app + .dmg
+npm --prefix web run desktop:build    # unsigned universal .app + .dmg
 ```
 
-The built app lands in `target/release/bundle/macos/rytm-builder.app` and `target/release/bundle/dmg/`. Copy those to Desktop if you want a double-clickable copy. First open: right-click the app → Open (unsigned).
+The built app lands in `target/universal-apple-darwin/release/bundle/macos/rytm-builder.app` and `…/bundle/dmg/`. Copy those to Desktop if you want a double-clickable copy. First open: right-click the app → Open (unsigned). Intel + Apple Silicon; macOS 10.15+.
 
 ## UI only (no compose)
 
