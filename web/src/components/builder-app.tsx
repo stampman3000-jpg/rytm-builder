@@ -39,6 +39,28 @@ function destLabel(i: number): string {
   return `${bank}${String(slot).padStart(2, "0")}`;
 }
 
+function kitNr(i: number): string {
+  return String(i).padStart(2, "0");
+}
+
+function parseDragPayload(raw: string, fallback: DragPayload | null): DragPayload | null {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as DragPayload;
+    if (
+      parsed.kind === "dest" ||
+      parsed.kind === "catalog" ||
+      parsed.kind === "dest-kit" ||
+      parsed.kind === "catalog-kit"
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
 type Held = {
   dumpPath: string;
   dumpName: string;
@@ -652,11 +674,13 @@ export function BuilderApp() {
           rytm-builder
         </p>
         <h1 className="mt-1 font-heading text-xl font-semibold tracking-tight md:text-2xl">
-          Browse dumps. Place on the grid. Export a new project.
+          {workMode === "kit"
+            ? "Browse dumps. Overwrite a dest kit slot. Export."
+            : "Browse dumps. Place on the grid. Export a new project."}
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
           {workMode === "kit"
-            ? "Kit tab overwrites dest kit slots in place. Patterns that already use that kit number pick up the new analog and samples. Grey matches dest base; red is the diff. Drop onto an occupied cell overwrites. No USB."
+            ? "Kit dest is the kit list (00–127), not the pattern grid. Drop overwrites that kit slot only — patterns keep their kit numbers and pick up the new analog and samples. Grey matches dest base; red is the diff. No USB."
             : "Composer, not an editor. Drag dest cells to rearrange (vacate or swap). Grey still matches dest base; red is the project differential. Pattern+kit copy on this tab. Settings-first so samples bind on the box. Restore into disposable RAM; +Drive already holds the files."}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -706,9 +730,9 @@ export function BuilderApp() {
         <span className="min-w-0 flex-1 truncate tracking-normal text-muted-foreground normal-case">
           {workMode === "kit"
             ? heldKit
-              ? `held ${heldKit.dumpName} ${destLabel(heldKit.kit.index)} ${heldKit.kit.name || "unnamed"} → dest kit (overwrites)`
+              ? `held ${heldKit.dumpName} kit ${kitNr(heldKit.kit.index)} ${heldKit.kit.name || "unnamed"} → dest kit slot (overwrites)`
               : selectedKitPiece && selectedCell !== null
-                ? `${destLabel(selectedKitPiece.destIndex)} ← ${selectedKitPiece.dumpName} ${destLabel(selectedKitPiece.originIndex)} ${selectedKitPiece.kit.name || ""}${
+                ? `kit ${kitNr(selectedKitPiece.destIndex)} ← ${selectedKitPiece.dumpName} kit ${kitNr(selectedKitPiece.originIndex)} ${selectedKitPiece.kit.name || ""}${
                     kitCellDiffers(
                       selectedCell,
                       selectedKitPiece,
@@ -718,8 +742,8 @@ export function BuilderApp() {
                       : " · matches dest base"
                   }`
                 : selectedKitVacated && selectedCell !== null
-                  ? `${destLabel(selectedCell)} kit vacated vs dest base (red)`
-                  : "kit dest overwrites in place · grey matches dest base · red is the diff"
+                  ? `kit ${kitNr(selectedCell)} vacated vs dest base (red)`
+                  : "kit dest is slots 00–127 · grey matches dest base · red is the diff"
             : held
               ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → empty dest cell`
               : selectedPiece && selectedCell !== null
@@ -917,15 +941,12 @@ export function BuilderApp() {
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-baseline gap-2">
-                            <span className="font-medium">{destLabel(k.index)}</span>
-                            <span className="truncate">
-                              {k.name || "unnamed kit"}
-                              <span className="text-muted-foreground"> · kit {k.index}</span>
-                            </span>
+                            <span className="font-medium">{kitNr(k.index)}</span>
+                            <span className="truncate">{k.name || "unnamed kit"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             {k.sample_refs} sample refs
-                            {n > 0 ? ` · on grid ×${n}` : ""}
+                            {n > 0 ? ` · on dest ×${n}` : ""}
                           </p>
                         </div>
                         <Button
@@ -1029,7 +1050,7 @@ export function BuilderApp() {
             </CardTitle>
             <CardDescription>
               {workMode === "kit"
-                ? "Drop overwrites the dest kit slot (patterns already using that kit pick up the new analog). Drag dest cells to rearrange. Grey = dest base. Red = diff. Base: "
+                ? "Kit slots 00–127 (same list as the Rytm). Drop overwrites that kit object only — not the pattern’s kit number. Drag a dest row to rearrange. Grey = dest base. Red = diff. Base: "
                 : "Drag occupied cells to rearrange (swap if target is full). Grey = matches dest base. Red = differs (new, moved, or vacated). Base: "}
               {templateName}
               {templateKind === "custom" ? " (override)" : ""}
@@ -1065,6 +1086,25 @@ export function BuilderApp() {
               {loadingDest && <span>Cataloging dest base…</span>}
             </div>
             {destError && <p className="text-sm text-destructive">{destError}</p>}
+            {workMode === "kit" ? (
+              <KitDestList
+                selectedCell={selectedCell}
+                heldKit={heldKit}
+                byKitDest={byKitDest}
+                kitBaseByIndex={kitBaseByIndex}
+                onCell={moveOrSelectKitCell}
+                onDestDragEnd={() => {
+                  skipCellClick.current = true;
+                  window.setTimeout(() => {
+                    skipCellClick.current = false;
+                  }, 50);
+                }}
+                onDropPayload={(i, payload) => {
+                  if (payload.kind === "dest-kit") rearrangeKitDest(payload.destIndex, i);
+                  else if (payload.kind === "catalog-kit") placeHeldKitAt(i, payload);
+                }}
+              />
+            ) : (
             <div className="overflow-x-auto">
               <div
                 className="grid gap-px"
@@ -1087,28 +1127,6 @@ export function BuilderApp() {
                     bank={bank}
                     selectedCell={selectedCell}
                     cell={(i) => {
-                      if (workMode === "kit") {
-                        const piece = byKitDest.get(i);
-                        const base = kitBaseByIndex.get(i);
-                        const differs = kitCellDiffers(i, piece, base);
-                        const vacated = !piece && !!base;
-                        return {
-                          occupied: !!piece,
-                          differs,
-                          vacated,
-                          title: piece
-                            ? `${destLabel(i)} ← ${piece.dumpName} ${destLabel(piece.originIndex)}${
-                                differs ? " · red vs dest base" : " · matches dest base"
-                              }`
-                            : vacated
-                              ? `${destLabel(i)} kit vacated vs dest base`
-                              : `${destLabel(i)} empty kit`,
-                          label: piece
-                            ? (piece.kit.name || destLabel(piece.originIndex)).slice(0, 3)
-                            : "",
-                          dropHint: !!heldKit,
-                        };
-                      }
                       const piece = byDest.get(i);
                       const base = baseByIndex.get(i);
                       const differs = cellDiffers(i, piece, base);
@@ -1130,9 +1148,7 @@ export function BuilderApp() {
                         dropHint: !!held && !piece,
                       };
                     }}
-                    onCell={(i) =>
-                      workMode === "kit" ? moveOrSelectKitCell(i) : moveOrSelectCell(i)
-                    }
+                    onCell={moveOrSelectCell}
                     onDestDragEnd={() => {
                       skipCellClick.current = true;
                       window.setTimeout(() => {
@@ -1140,28 +1156,16 @@ export function BuilderApp() {
                       }, 50);
                     }}
                     onDropPayload={(i, payload) => {
-                      if (workMode === "kit") {
-                        if (payload.kind === "dest-kit") rearrangeKitDest(payload.destIndex, i);
-                        else if (payload.kind === "catalog-kit") placeHeldKitAt(i, payload);
-                        return;
-                      }
                       if (payload.kind === "dest") rearrangeDest(payload.destIndex, i);
                       else if (payload.kind === "catalog") placeHeldAt(i, payload);
                     }}
-                    dragKind={workMode === "kit" ? "dest-kit" : "dest"}
-                    heldFallback={
-                      workMode === "kit"
-                        ? heldKit
-                          ? { kind: "catalog-kit", ...heldKit }
-                          : null
-                        : held
-                          ? { kind: "catalog", ...held }
-                          : null
-                    }
+                    dragKind="dest"
+                    heldFallback={held ? { kind: "catalog", ...held } : null}
                   />
                 ))}
               </div>
             </div>
+            )}
             {workMode === "patkit" && selectedPiece && (
               <div className="flex items-start justify-between gap-2 border border-border bg-muted px-2 py-2 text-xs">
                 <p>
@@ -1193,8 +1197,8 @@ export function BuilderApp() {
             {workMode === "kit" && selectedKitPiece && (
               <div className="flex items-start justify-between gap-2 border border-border bg-muted px-2 py-2 text-xs">
                 <p>
-                  {destLabel(selectedKitPiece.destIndex)} ← {selectedKitPiece.dumpName}{" "}
-                  {destLabel(selectedKitPiece.originIndex)} ·{" "}
+                  kit {kitNr(selectedKitPiece.destIndex)} ← {selectedKitPiece.dumpName}{" "}
+                  kit {kitNr(selectedKitPiece.originIndex)} ·{" "}
                   {selectedKitPiece.kit.name || "unnamed"}
                   {selectedKitPiece.origin === "base" &&
                   selectedCell !== null &&
@@ -1214,7 +1218,7 @@ export function BuilderApp() {
             {workMode === "kit" && selectedKitVacated && selectedCell !== null && (
               <div className="border border-primary bg-primary/15 px-2 py-2 text-xs">
                 <p>
-                  {destLabel(selectedCell)} kit vacated vs dest base (red empty).
+                  kit {kitNr(selectedCell)} vacated vs dest base (red empty).
                   Patterns still pointing at this kit number will play an empty
                   kit. Drop to overwrite or leave empty.
                 </p>
@@ -1232,9 +1236,9 @@ export function BuilderApp() {
             <p className="text-xs text-muted-foreground">
               Downloads a .syx. This app never talks to the Rytm — receive the
               file in your sysex editor. Project = whole dump into empty RAM.
-              Edits = red cells only onto dest-base already in RAM.{" "}
+              Edits = red slots only onto dest-base already in RAM.{" "}
               {workMode === "kit"
-                ? "This tab writes kits only (no pattern objects)."
+                ? "This tab writes kit objects only (pattern kit numbers stay put)."
                 : "This tab writes pattern+kit together."}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -1268,6 +1272,106 @@ export function BuilderApp() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function kitRowTone(occupied: boolean, differs: boolean, vacated: boolean): string {
+  if (occupied) {
+    return differs
+      ? "border-primary bg-primary text-primary-foreground"
+      : "border-muted-foreground bg-secondary text-foreground";
+  }
+  if (vacated) {
+    return "border-primary bg-primary/35 text-primary-foreground";
+  }
+  return "border-border bg-background text-muted-foreground";
+}
+
+function KitDestList({
+  selectedCell,
+  heldKit,
+  byKitDest,
+  kitBaseByIndex,
+  onCell,
+  onDestDragEnd,
+  onDropPayload,
+}: {
+  selectedCell: number | null;
+  heldKit: HeldKit | null;
+  byKitDest: Map<number, DestKitPiece>;
+  kitBaseByIndex: Map<number, KitRow>;
+  onCell: (i: number) => void;
+  onDestDragEnd: () => void;
+  onDropPayload: (i: number, payload: DragPayload) => void;
+}) {
+  const heldFallback: DragPayload | null = heldKit
+    ? { kind: "catalog-kit", ...heldKit }
+    : null;
+  return (
+    <ScrollArea className="h-[min(48vh,380px)]">
+      <div className="grid grid-cols-2 gap-px pr-2">
+        {Array.from({ length: 128 }, (_, i) => {
+          const piece = byKitDest.get(i);
+          const base = kitBaseByIndex.get(i);
+          const differs = kitCellDiffers(i, piece, base);
+          const vacated = !piece && !!base;
+          const selected = selectedCell === i;
+          const name = piece
+            ? piece.kit.name || "unnamed"
+            : vacated
+              ? "empty"
+              : "";
+          const title = piece
+            ? `kit ${kitNr(i)} ← ${piece.dumpName} kit ${kitNr(piece.originIndex)}${
+                differs ? " · red vs dest base" : " · matches dest base"
+              }`
+            : vacated
+              ? `kit ${kitNr(i)} vacated vs dest base`
+              : `kit ${kitNr(i)} empty`;
+          return (
+            <button
+              key={i}
+              type="button"
+              draggable={!!piece}
+              title={title}
+              onClick={() => onCell(i)}
+              onDragStart={(e) => {
+                if (!piece) return;
+                e.dataTransfer.setData(
+                  "application/json",
+                  JSON.stringify({ kind: "dest-kit", destIndex: i } satisfies DragPayload)
+                );
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragEnd={() => onDestDragEnd()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const payload = parseDragPayload(
+                  e.dataTransfer.getData("application/json"),
+                  heldFallback
+                );
+                if (payload) onDropPayload(i, payload);
+              }}
+              className={`flex min-h-8 items-center gap-2 rounded-[2px] border px-2 text-left text-sm ${kitRowTone(
+                !!piece,
+                differs,
+                vacated
+              )} ${selected ? "outline outline-1 outline-offset-1 outline-white" : ""} ${
+                heldKit ? "hover:border-primary" : ""
+              }`}
+            >
+              <span className="w-6 shrink-0 text-[11px] tracking-wide">{kitNr(i)}</span>
+              <span className="min-w-0 truncate">{name}</span>
+            </button>
+          );
+        })}
+      </div>
+    </ScrollArea>
   );
 }
 
@@ -1330,26 +1434,11 @@ function BankRow({
             onDrop={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              const raw = e.dataTransfer.getData("application/json");
-              if (!raw) {
-                if (heldFallback) onDropPayload(i, heldFallback);
-                return;
-              }
-              try {
-                const parsed = JSON.parse(raw) as DragPayload;
-                if (
-                  parsed.kind === "dest" ||
-                  parsed.kind === "catalog" ||
-                  parsed.kind === "dest-kit" ||
-                  parsed.kind === "catalog-kit"
-                ) {
-                  onDropPayload(i, parsed);
-                } else if (heldFallback) {
-                  onDropPayload(i, heldFallback);
-                }
-              } catch {
-                if (heldFallback) onDropPayload(i, heldFallback);
-              }
+              const payload = parseDragPayload(
+                e.dataTransfer.getData("application/json"),
+                heldFallback
+              );
+              if (payload) onDropPayload(i, payload);
             }}
             className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone} ${
               selected ? "outline outline-1 outline-offset-1 outline-white" : ""
