@@ -229,9 +229,9 @@ pub fn write_settings_first(project: &Project, path: &Path) -> Result<ExportChec
     Ok(check)
 }
 
-/// Objects that differ from `before` (dest-base): settings + changed kits
-/// (raw diffs, and kits linked from nonempty changed patterns) + changed patterns.
-/// Kit-only overwrites emit settings + kits with no pattern messages.
+/// Objects that differ from `before` (dest-base): settings + kits whose raw
+/// changed + patterns whose raw changed. Linked dest kits are not included unless
+/// the kit object itself changed (pattern-only edits stay kit-free).
 pub fn collect_edits(before: &Project, after: &Project) -> Result<Vec<Object>, String> {
     let settings = find_raw(after, OBJ_SETTINGS, 0)
         .ok_or_else(|| "destination missing settings".to_string())?
@@ -270,12 +270,6 @@ pub fn collect_edits(before: &Project, after: &Project) -> Result<Vec<Object>, S
         let p = find_raw(after, OBJ_PATTERN, nr)
             .ok_or_else(|| format!("dest missing pattern {}", crate::layout::pattern_label(nr)))?
             .clone();
-        if count_pattern_trigs(&p.raw) != 0 {
-            let kn = pattern_kit_number(&p.raw);
-            if kn < 128 {
-                kit_nrs.insert(kn);
-            }
-        }
         patterns.push(p);
     }
 
@@ -285,9 +279,7 @@ pub fn collect_edits(before: &Project, after: &Project) -> Result<Vec<Object>, S
 
     let mut kits = Vec::new();
     for kn in kit_nrs {
-        let k = find_raw(after, OBJ_KIT, kn).ok_or_else(|| {
-            format!("dest missing kit {kn} linked from an edit")
-        })?;
+        let k = find_raw(after, OBJ_KIT, kn).ok_or_else(|| format!("dest missing kit {kn}"))?;
         kits.push(k.clone());
     }
 
@@ -456,6 +448,35 @@ mod tests {
         assert_eq!(edits[0].obj_type, OBJ_SETTINGS);
         assert_eq!(edits[1].obj_type, OBJ_KIT);
         assert_eq!(edits[1].obj_nr, 2);
+    }
+
+    #[test]
+    fn collect_edits_pattern_only_omits_unchanged_kit() {
+        let before = Project {
+            path: "before".into(),
+            objects: vec![
+                obj(OBJ_SETTINGS, 0, DUMP_SETTINGS),
+                Object {
+                    sysex: vec![0xF0, 0x00, 0x20, 0x3C, 0x07, 0x00, DUMP_KIT, 0xF7],
+                    raw: vec![1, 2, 3],
+                    obj_type: OBJ_KIT,
+                    obj_nr: 0,
+                },
+                Object {
+                    sysex: vec![0xF0, 0x00, 0x20, 0x3C, 0x07, 0x00, DUMP_PATTERN, 0xF7],
+                    raw: vec![9, 9],
+                    obj_type: OBJ_PATTERN,
+                    obj_nr: 0,
+                },
+            ],
+        };
+        let mut after = before.clone();
+        after.objects[2].raw = vec![7, 7, 7];
+        let edits = collect_edits(&before, &after).unwrap();
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[0].obj_type, OBJ_SETTINGS);
+        assert_eq!(edits[1].obj_type, OBJ_PATTERN);
+        assert_eq!(edits[1].obj_nr, 0);
     }
 
     #[test]

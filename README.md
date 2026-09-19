@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), or switch to the **KIT** tab to overwrite dest kit slots 00–127 from a dual-column kit list (not the pattern grid). Patterns that already use that kit pick up the new analog. Drag dest rows to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). Kit-tab edits omit pattern objects. This tool never talks USB. Restore model: receive the file in a sysex editor.
+Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), switch to **KIT** for dest kit slots 00–127, or **PAT** to overwrite dest pattern slots while keeping dest kit numbers. Drag dest cells/rows to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). Kit-tab edits omit pattern objects; pattern-tab edits omit unchanged kits. This tool never talks USB. Restore model: receive the file in a sysex editor.
 
 ## Catalog a dump
 
@@ -57,6 +57,15 @@ cargo run -- compose \
   --copy-kit /path/to/Untitled-1.syx:A03:A01
 ```
 
+Pattern-only (keeps dest kit number):
+
+```bash
+cargo run -- compose \
+  --template /path/to/Untitled.syx \
+  --edits-out /path/to/PatSwap__edits.syx \
+  --copy-pattern /path/to/Untitled-1.syx:A03:A01
+```
+
 Rules the tool will not bend:
 
 - Never overwrites `--out` or `--report` if the path already exists.
@@ -85,7 +94,7 @@ This app never talks to the device. Receive the downloaded `.syx` in Transfer / 
 
 ## What this version does not do
 
-No live USB, no firmware SysEx, no Transfer `.arpj`, no sample upload, no song editing, no in-place project surgery, no sample names. Pattern-only copy is not in this build (kit tab is).
+No live USB, no firmware SysEx, no Transfer `.arpj`, no sample upload, no song editing, no in-place project surgery, no sample names.
 
 ## Proven fixture (Play 1)
 

@@ -37,6 +37,16 @@ pub struct KitCopyReport {
     pub sample_map: Vec<RemapLine>,
 }
 
+pub struct PatternCopyReport {
+    pub src_path: String,
+    pub src_pattern: u8,
+    pub dest_pattern: u8,
+    pub dest_kit: u8,
+    pub trigs: u32,
+    pub sample_map: Vec<RemapLine>,
+    pub plock_rewrites: u32,
+}
+
 pub fn parse_copy_spec(s: &str) -> Result<CopySpec, String> {
     let (left, last) = s
         .rsplit_once(':')
@@ -67,17 +77,14 @@ fn needed_kit_sample_slots(kit: &[u8]) -> BTreeSet<u8> {
     set
 }
 
-fn needed_sample_slots(kit: &[u8], pattern: &[u8]) -> BTreeSet<u8> {
-    let mut set = needed_kit_sample_slots(kit);
-    // SMP_NR plocks
-    let base = PLOCK_SEQS;
+fn needed_plock_sample_slots(pattern: &[u8]) -> BTreeSet<u8> {
+    let mut set = BTreeSet::new();
     for i in 0..NUM_PLOCK_SEQS {
-        let off = base + i * PLOCK_SEQ_SZ;
+        let off = PLOCK_SEQS + i * PLOCK_SEQ_SZ;
         if off + PLOCK_SEQ_SZ > pattern.len() {
             break;
         }
-        let ty = pattern[off];
-        if ty != PLOCK_TYPE_SMP_NR {
+        if pattern[off] != PLOCK_TYPE_SMP_NR {
             continue;
         }
         for b in 0..64 {
@@ -87,6 +94,12 @@ fn needed_sample_slots(kit: &[u8], pattern: &[u8]) -> BTreeSet<u8> {
             }
         }
     }
+    set
+}
+
+fn needed_sample_slots(kit: &[u8], pattern: &[u8]) -> BTreeSet<u8> {
+    let mut set = needed_kit_sample_slots(kit);
+    set.extend(needed_plock_sample_slots(pattern));
     set
 }
 
@@ -294,8 +307,7 @@ fn apply_kit_sample_remap(kit: &mut [u8], remap: &[i16; 128]) {
     }
 }
 
-fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
-    apply_kit_sample_remap(kit, remap);
+fn apply_plock_sample_remap(pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
     let mut plocks = 0u32;
     for i in 0..NUM_PLOCK_SEQS {
         let off = PLOCK_SEQS + i * PLOCK_SEQ_SZ;
@@ -317,6 +329,11 @@ fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) ->
         }
     }
     plocks
+}
+
+fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
+    apply_kit_sample_remap(kit, remap);
+    apply_plock_sample_remap(pattern, remap)
 }
 
 /// Copy one source pattern + linked kit into dest (template). Mutates dest in place.
@@ -505,6 +522,98 @@ pub fn copy_kit(
     })
 }
 
+/// Overwrite dest pattern with a source pattern. Does not write kits.
+/// Keeps the dest slot’s existing kit_number so analog stays dest’s.
+/// Occupied dest patterns are overwritten (unlike PAT+KIT).
+/// `None` dest = first empty pattern (legacy auto-pack).
+pub fn copy_pattern(
+    src: &Project,
+    dest: &mut Project,
+    src_pat: u8,
+    dest_pat: Option<u8>,
+) -> Result<PatternCopyReport, String> {
+    let sp = find_raw(src, OBJ_PATTERN, src_pat)
+        .ok_or_else(|| format!("{}: missing pattern {}", src.path, pattern_label(src_pat)))?;
+    if sp.raw.len() != PATTERN_RAW_SZ {
+        return Err(format!(
+            "pattern raw size {} != {PATTERN_RAW_SZ} (not FW 1.70 v5?)",
+            sp.raw.len()
+        ));
+    }
+    let ss =
+        find_raw(src, OBJ_SETTINGS, 0).ok_or_else(|| format!("{}: missing settings", src.path))?;
+    let dest_pat = match dest_pat {
+        Some(n) => {
+            find_raw(dest, OBJ_PATTERN, n).ok_or_else(|| {
+                format!("dest missing pattern {}", pattern_label(n))
+            })?;
+            n
+        }
+        None => first_empty_pattern(dest)?,
+    };
+    let dest_kit = {
+        let dest_obj = find_raw(dest, OBJ_PATTERN, dest_pat).ok_or_else(|| {
+            format!("dest missing pattern {}", pattern_label(dest_pat))
+        })?;
+        let kn = pattern_kit_number(&dest_obj.raw);
+        if kn < 128 {
+            kn
+        } else {
+            let src_kn = pattern_kit_number(&sp.raw);
+            if src_kn < 128 {
+                src_kn
+            } else {
+                dest_pat
+            }
+        }
+    };
+
+    let needed = needed_plock_sample_slots(&sp.raw);
+    let dest_settings_idx = dest
+        .objects
+        .iter()
+        .position(|o| o.obj_type == OBJ_SETTINGS)
+        .ok_or_else(|| "destination missing settings".to_string())?;
+    if dest.objects[dest_settings_idx].raw.len() != SETTINGS_RAW_SZ {
+        return Err("destination settings raw size mismatch".into());
+    }
+    let src_kit_nr = pattern_kit_number(&sp.raw);
+    let (remap, sample_map) = bind_samples(
+        &src.path,
+        src_kit_nr,
+        &ss.raw,
+        dest,
+        dest_settings_idx,
+        &needed,
+    )?;
+
+    let mut pat_raw = sp.raw.clone();
+    let plock_rewrites = apply_plock_sample_remap(&mut pat_raw, &remap);
+    pat_raw[PATTERN_KIT_NUMBER] = dest_kit;
+
+    {
+        let dp = find_raw_mut(dest, OBJ_PATTERN, dest_pat)
+            .ok_or_else(|| format!("dest missing pattern {dest_pat}"))?;
+        if dp.raw.len() != pat_raw.len() {
+            return Err("dest pattern size mismatch".into());
+        }
+        dp.raw = pat_raw;
+        dp.obj_nr = u16::from(dest_pat);
+        encode_object(dp)?;
+    }
+    encode_object(&mut dest.objects[dest_settings_idx])?;
+
+    Ok(PatternCopyReport {
+        src_path: src.path.clone(),
+        src_pattern: src_pat,
+        dest_pattern: dest_pat,
+        dest_kit,
+        trigs: count_pattern_trigs(&sp.raw),
+        sample_map,
+        plock_rewrites,
+    })
+}
+
 pub fn format_report(
     template: &str,
     out: &str,
@@ -512,6 +621,7 @@ pub fn format_report(
     vacated: &[u8],
     kit_copies: &[KitCopyReport],
     vacated_kits: &[u8],
+    pattern_copies: &[PatternCopyReport],
     check: &crate::project::ExportCheck,
     sources_unchanged: bool,
     sample_slots: usize,
@@ -588,6 +698,30 @@ pub fn format_report(
         }
         s.push('\n');
     }
+    for (i, c) in pattern_copies.iter().enumerate() {
+        s.push_str(&format!(
+            "[pat {}] {} {}  ->  dest {} (keeps dest kit {})\n",
+            i + 1,
+            c.src_path,
+            pattern_label(c.src_pattern),
+            pattern_label(c.dest_pattern),
+            c.dest_kit
+        ));
+        s.push_str(&format!(
+            "    kits not written; dest pattern slot overwritten in place  trigs={} plock_smp_nr_rewrites={}\n",
+            c.trigs, c.plock_rewrites
+        ));
+        if c.sample_map.is_empty() {
+            s.push_str("    samples: none\n");
+        }
+        for m in &c.sample_map {
+            s.push_str(&format!(
+                "    sample src {} -> dest {} ({})\n",
+                m.src_slot, m.dest_slot, m.action
+            ));
+        }
+        s.push('\n');
+    }
     s
 }
 
@@ -607,7 +741,7 @@ pub fn format_edits_lines(
     }
     let mut s = String::new();
     s.push_str(&format!("  edits:    {path}\n"));
-    s.push_str("  edits_order: settings, kits, patterns (no songs/globals; kit-only omits patterns)\n");
+    s.push_str("  edits_order: settings, kits, patterns (no songs/globals; kit-only omits patterns, pattern-only omits unchanged kits)\n");
     s.push_str(&format!(
         "  edits_messages: {}  bytes: {}  md5: {}\n",
         check.messages, check.bytes, check.md5

@@ -17,6 +17,7 @@ type Body = {
   vacates?: string[];
   kitCopies?: { path: string; kit: string; dest: string }[];
   kitVacates?: string[];
+  patternCopies?: { path: string; pattern: string; dest: string }[];
 };
 
 export async function POST(req: Request) {
@@ -26,13 +27,15 @@ export async function POST(req: Request) {
     const vacates = body.vacates ?? [];
     const kitCopies = body.kitCopies ?? [];
     const kitVacates = body.kitVacates ?? [];
+    const patternCopies = body.patternCopies ?? [];
     const mode = body.mode === "edits" ? "edits" : "project";
     if (
       !body.name ||
       (copies.length === 0 &&
         vacates.length === 0 &&
         kitCopies.length === 0 &&
-        kitVacates.length === 0)
+        kitVacates.length === 0 &&
+        patternCopies.length === 0)
     ) {
       return NextResponse.json(
         { error: "need output name and at least one copy or vacate" },
@@ -93,6 +96,22 @@ export async function POST(req: Request) {
           ? template
           : resolveLibraryFile(c.path);
       args.push("--copy-kit", `${src}:${c.kit}:${c.dest}`);
+    }
+    for (const c of patternCopies) {
+      if (!c.pattern) {
+        return NextResponse.json({ error: "each pattern copy needs a pattern" }, { status: 400 });
+      }
+      if (!c.dest) {
+        return NextResponse.json(
+          { error: "each pattern copy needs a dest slot (A01–H16)" },
+          { status: 400 }
+        );
+      }
+      const src =
+        c.path === "@dest" || c.path === "__dest__"
+          ? template
+          : resolveLibraryFile(c.path);
+      args.push("--copy-pattern", `${src}:${c.pattern}:${c.dest}`);
     }
     const { stdout } = await runBuilder(args);
     const file = `${outName}.syx`;
