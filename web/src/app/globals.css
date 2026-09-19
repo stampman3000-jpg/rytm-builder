@@ -122,6 +122,192 @@
   --sidebar-ring: #e10600;
 }
 
+.app-shell {
+  font-variant-numeric: tabular-nums;
+}
+
+.instrument-header {
+  background: #0e0e0e;
+}
+
+.brand-mark {
+  color: #f4f4f4;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.25em;
+  line-height: 1;
+}
+
+.brand-mark span {
+  color: var(--primary);
+  padding-inline: 0.2em;
+}
+
+.header-status {
+  color: #727272;
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-align: right;
+}
+
+.mode-rail {
+  border-bottom: 1px solid #363636;
+  gap: 0;
+}
+
+.mode-tab {
+  position: relative;
+  min-width: 6.5rem;
+  height: 2.35rem;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #898989 !important;
+  font-size: 0.68rem !important;
+  letter-spacing: 0.18em;
+  transition: color 120ms ease;
+}
+
+.mode-tab:hover {
+  color: #f4f4f4 !important;
+}
+
+.mode-tab::after {
+  position: absolute;
+  right: 0.65rem;
+  bottom: -1px;
+  left: 0.65rem;
+  height: 2px;
+  background: transparent;
+  content: "";
+}
+
+.mode-tab-active {
+  color: #f4f4f4 !important;
+}
+
+.mode-tab-active::after {
+  background: var(--primary);
+}
+
+.status-strip {
+  min-height: 2.55rem;
+  background: #111111;
+}
+
+.status-strip > span {
+  white-space: nowrap;
+}
+
+.panel {
+  border-color: #2d2d2d;
+  background: #121212;
+}
+
+.panel-header {
+  min-height: 3.7rem;
+  background: #151515;
+  border-bottom-color: #2d2d2d !important;
+}
+
+.panel-header [data-slot="card-title"] {
+  color: #ececec;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.panel-header [data-slot="card-description"] {
+  color: #787878;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.panel-dragging {
+  border-color: var(--primary);
+}
+
+.library-row,
+.pattern-row,
+.kit-row {
+  border-left: 2px solid transparent;
+  color: #d8d8d8;
+}
+
+.library-row-active {
+  border-left-color: var(--primary);
+  background: #242424 !important;
+}
+
+.library-row:hover,
+.pattern-row:hover,
+.kit-row:hover {
+  background: #1c1c1c;
+}
+
+.library-row-active:hover {
+  background: #292929 !important;
+}
+
+.slot-grid > div > div {
+  color: #737373;
+}
+
+.slot-button {
+  border-color: #353535 !important;
+  box-shadow: none !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.slot-button:hover {
+  border-color: #8b8b8b !important;
+}
+
+.kit-dest-row {
+  min-height: 2.1rem;
+  border-color: #353535 !important;
+  font-size: 0.78rem;
+}
+
+.kit-dest-row:hover {
+  border-color: #767676 !important;
+}
+
+.file-name-field {
+  display: block;
+}
+
+.field-label {
+  color: #858585;
+  font-size: 0.63rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+}
+
+.export-note {
+  max-width: 52rem;
+  line-height: 1.45;
+}
+
+.export-strip {
+  border-top: 1px solid #2d2d2d;
+  padding-top: 0.75rem;
+}
+
+.export-button {
+  min-height: 2.45rem;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -815,30 +815,33 @@ export function BuilderApp() {
         : sampleEstimate;
 
   return (
-    <div className="flex min-h-full flex-col bg-background">
-      <header className="border-b border-border px-4 py-4 md:px-6">
-        <p className="text-[11px] tracking-[0.32em] text-primary uppercase">
-          rytm-builder
-        </p>
-        <h1 className="mt-1 font-heading text-xl font-semibold tracking-tight md:text-2xl">
+    <div className="app-shell flex min-h-full flex-col bg-background">
+      <header className="instrument-header border-b border-border px-4 py-4 md:px-6">
+        <div className="flex items-center justify-between gap-4">
+          <p className="brand-mark">
+            RYTM <span>/</span> BUILDER
+          </p>
+          <span className="header-status">OFFLINE COMPOSER · FW 1.70 / V5</span>
+        </div>
+        <h1 className="mt-3 font-heading text-lg font-medium tracking-tight md:text-xl">
           {workMode === "kit"
             ? "Browse dumps. Overwrite a dest kit slot. Export."
             : workMode === "pat"
               ? "Browse dumps. Overwrite a dest pattern slot. Export."
               : "Browse dumps. Place on the grid. Export a new project."}
         </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-muted-foreground">
           {workMode === "kit"
             ? "Kit dest is the kit list (00–127), not the pattern grid. Drop overwrites that kit slot only — patterns keep their kit numbers and pick up the new analog and samples. Grey matches dest base; red is the diff. No USB."
             : workMode === "pat"
               ? "Pattern dest is the A–H grid. Drop overwrites that pattern slot only and keeps the dest kit number — analog stays put. Grey matches dest base; red is the diff. No USB."
               : "Composer, not an editor. Drag dest cells to rearrange (vacate or swap). Grey still matches dest base; red is the project differential. Pattern+kit copy on this tab. Settings-first so samples bind on the box. Restore into disposable RAM; +Drive already holds the files."}
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mode-rail mt-4 flex max-w-lg">
           <Button
             size="sm"
             variant={workMode === "patkit" ? "default" : "outline"}
-            className="rounded-[2px] tracking-[0.18em] uppercase"
+            className={`mode-tab ${workMode === "patkit" ? "mode-tab-active" : ""}`}
             onClick={() => switchMode("patkit")}
           >
             PAT+KIT
@@ -846,7 +849,7 @@ export function BuilderApp() {
           <Button
             size="sm"
             variant={workMode === "kit" ? "default" : "outline"}
-            className="rounded-[2px] tracking-[0.18em] uppercase"
+            className={`mode-tab ${workMode === "kit" ? "mode-tab-active" : ""}`}
             onClick={() => switchMode("kit")}
           >
             KIT
@@ -854,7 +857,7 @@ export function BuilderApp() {
           <Button
             size="sm"
             variant={workMode === "pat" ? "default" : "outline"}
-            className="rounded-[2px] tracking-[0.18em] uppercase"
+            className={`mode-tab ${workMode === "pat" ? "mode-tab-active" : ""}`}
             onClick={() => switchMode("pat")}
           >
             PAT
@@ -862,7 +865,7 @@ export function BuilderApp() {
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-card px-4 py-2 font-sans text-[11px] tracking-[0.18em] uppercase md:px-6">
+      <div className="status-strip flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-card px-4 py-2 font-sans text-[11px] tracking-[0.18em] uppercase md:px-6">
         <span>
           {silk("PAT")}{" "}
           <span className="tracking-normal text-foreground">
@@ -937,7 +940,7 @@ export function BuilderApp() {
         </span>
       </div>
 
-      <div className="grid flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_minmax(0,1.4fr)] md:p-4">
+      <div className="workspace-grid grid flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_minmax(0,1.4fr)] md:p-4">
         <Card
           onDragOver={(e) => {
             e.preventDefault();
@@ -949,14 +952,14 @@ export function BuilderApp() {
             setSourceDrag(false);
             void importSyx(Array.from(e.dataTransfer.files), "library");
           }}
-          className={sourceDrag ? "border-primary" : ""}
+          className={`panel ${sourceDrag ? "panel-dragging" : ""}`}
         >
-          <CardHeader className="border-b">
+          <CardHeader className="panel-header border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
               Source
             </CardTitle>
             <CardDescription className="text-xs">
-              Drop .syx dumps here. {dumps.length} in library.
+              {dumps.length} dumps in library.
               {importing ? " Importing…" : ""}
             </CardDescription>
           </CardHeader>
@@ -1010,9 +1013,9 @@ export function BuilderApp() {
                       <button
                         type="button"
                         onClick={() => setSelected(d)}
-                        className={`flex w-full flex-col gap-0.5 rounded-[2px] px-2 py-1.5 text-left text-sm ${
+                        className={`library-row flex w-full flex-col gap-0.5 rounded-[2px] px-2 py-1.5 text-left text-sm ${
                           active
-                            ? "bg-primary text-primary-foreground"
+                            ? "library-row-active text-foreground"
                             : "hover:bg-muted"
                         }`}
                       >
@@ -1036,8 +1039,8 @@ export function BuilderApp() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="border-b">
+        <Card className="panel">
+          <CardHeader className="panel-header border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
               {workMode === "kit"
                 ? selected
@@ -1051,13 +1054,6 @@ export function BuilderApp() {
                     ? `Kit / Pat  ${selected.name.replace(/\.syx$/i, "")}`
                     : "Kit / Pat"}
             </CardTitle>
-            <CardDescription>
-              {catalog
-                ? workMode === "kit"
-                  ? `${catalog.kits.length} kits · ${catalog.sample_slots_used}/128 sample slots`
-                  : `${catalog.patterns.length} nonempty · ${catalog.sample_slots_used}/128 sample slots`
-                : "Select a dump to catalog it."}
-            </CardDescription>
             <CardDescription>
               {catalog
                 ? workMode === "kit"
@@ -1139,7 +1135,7 @@ export function BuilderApp() {
                           );
                           holdKitFromCatalog(k);
                         }}
-                        className={`flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
+                        className={`kit-row flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
                           isHeld ? "bg-primary/20" : "hover:bg-muted/60"
                         }`}
                       >
@@ -1188,7 +1184,7 @@ export function BuilderApp() {
                           );
                           holdFromCatalog(p);
                         }}
-                        className={`flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
+                        className={`pattern-row flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
                           isHeld ? "bg-primary/20" : "hover:bg-muted/60"
                         }`}
                       >
@@ -1254,9 +1250,9 @@ export function BuilderApp() {
             setBaseDrag(false);
             void importSyx(Array.from(e.dataTransfer.files), "template");
           }}
-          className={baseDrag ? "border-primary" : ""}
+          className={`panel ${baseDrag ? "panel-dragging" : ""}`}
         >
-          <CardHeader className="border-b">
+          <CardHeader className="panel-header border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
               {workMode === "kit" ? "Kit dest" : "Pat dest"}
             </CardTitle>
@@ -1319,7 +1315,7 @@ export function BuilderApp() {
                 }}
               />
             ) : (
-            <div className="overflow-x-auto">
+            <div className="slot-grid overflow-x-auto">
               <div
                 className="grid gap-px"
                 style={{
@@ -1473,16 +1469,16 @@ export function BuilderApp() {
                 </p>
               </div>
             )}
-            <label className="text-sm">
-              New file name
+            <label className="file-name-field text-[13px]">
+              <span className="field-label">NEW FILE</span>
               <Input
-                className="mt-1 rounded-[2px] font-sans"
+                className="mt-1 rounded-[2px] border-border bg-background font-sans"
                 value={outName}
                 onChange={(e) => setOutName(e.target.value)}
                 placeholder="Fresh_from_picks"
               />
             </label>
-            <p className="text-xs text-muted-foreground">
+            <p className="export-note text-xs text-muted-foreground">
               Downloads a .syx. This app never talks to the Rytm — receive the
               file in your sysex editor. Project = whole dump into empty RAM.
               Edits = red slots only onto dest-base already in RAM.{" "}
@@ -1492,16 +1488,16 @@ export function BuilderApp() {
                   ? "This tab writes pattern objects only (dest kit numbers stay put)."
                   : "This tab writes pattern+kit together."}
             </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="export-strip flex flex-col gap-2 sm:flex-row">
               <Button
-                className="rounded-[2px] flex-1"
+                className="export-button rounded-[2px] flex-1"
                 onClick={() => void exportFresh("project")}
                 disabled={composing || activeDiffCount === 0}
               >
                 {composing ? "Composing…" : "Download project .syx"}
               </Button>
               <Button
-                className="rounded-[2px] flex-1"
+                className="export-button rounded-[2px] flex-1"
                 variant="secondary"
                 onClick={() => void exportFresh("edits")}
                 disabled={composing || activeDiffCount === 0}
@@ -1637,7 +1633,7 @@ function SourceBankRow({
               );
               onHold(pattern);
             }}
-            className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone}`}
+            className={`slot-button aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone}`}
           >
             {pattern ? (pattern.kit_name || pattern.label).slice(0, 3) : ""}
           </button>
@@ -1729,7 +1725,7 @@ function KitDestList({
                 );
                 if (payload) onDropPayload(i, payload);
               }}
-              className={`flex min-h-8 items-center gap-2 rounded-[2px] border px-2 text-left text-sm ${kitRowTone(
+              className={`kit-dest-row flex min-h-8 items-center gap-2 rounded-[2px] border px-2 text-left text-sm ${kitRowTone(
                 !!piece,
                 differs,
                 vacated
@@ -1812,7 +1808,7 @@ function BankRow({
               );
               if (payload) onDropPayload(i, payload);
             }}
-            className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone} ${
+            className={`slot-button aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone} ${
               selected ? "outline outline-1 outline-offset-1 outline-white" : ""
             } ${view.dropHint ? "hover:border-primary" : ""}`}
           >
