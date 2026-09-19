@@ -13,8 +13,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import type { Catalog, DestPiece, DumpInfo, PatternRow } from "@/lib/types";
+import type {
+  Catalog,
+  DestKitPiece,
+  DestPiece,
+  DumpInfo,
+  KitRow,
+  PatternRow,
+} from "@/lib/types";
 import { DEST_BASE_PATH } from "@/lib/types";
+
+type WorkMode = "patkit" | "kit";
 
 const EMPTY_DEST: Catalog = {
   file: "Baked empty",
@@ -36,9 +45,26 @@ type Held = {
   pattern: PatternRow;
 };
 
+type HeldKit = {
+  dumpPath: string;
+  dumpName: string;
+  kit: KitRow;
+};
+
 type DragPayload =
   | ({ kind: "catalog" } & Held)
-  | { kind: "dest"; destIndex: number };
+  | { kind: "dest"; destIndex: number }
+  | ({ kind: "catalog-kit" } & HeldKit)
+  | { kind: "dest-kit"; destIndex: number };
+
+type CellView = {
+  occupied: boolean;
+  differs: boolean;
+  vacated: boolean;
+  title: string;
+  label: string;
+  dropHint: boolean;
+};
 
 function matchesBase(piece: DestPiece, index: number) {
   return piece.origin === "base" && piece.originIndex === index;
@@ -51,6 +77,20 @@ function cellDiffers(
 ) {
   if (!piece && !base) return false;
   if (piece && matchesBase(piece, index)) return false;
+  return true;
+}
+
+function matchesKitBase(piece: DestKitPiece, index: number) {
+  return piece.origin === "base" && piece.originIndex === index;
+}
+
+function kitCellDiffers(
+  index: number,
+  piece: DestKitPiece | undefined,
+  base: KitRow | undefined
+) {
+  if (!piece && !base) return false;
+  if (piece && matchesKitBase(piece, index)) return false;
   return true;
 }
 
@@ -95,7 +135,10 @@ export function BuilderApp() {
   const [loadingDest, setLoadingDest] = useState(false);
   const [destError, setDestError] = useState<string | null>(null);
   const [held, setHeld] = useState<Held | null>(null);
+  const [heldKit, setHeldKit] = useState<HeldKit | null>(null);
+  const [workMode, setWorkMode] = useState<WorkMode>("patkit");
   const [selectedCell, setSelectedCell] = useState<number | null>(null);
+  const [kitPieces, setKitPieces] = useState<DestKitPiece[]>([]);
   const [outName, setOutName] = useState("Fresh_from_picks");
   const [composing, setComposing] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
@@ -109,9 +152,21 @@ export function BuilderApp() {
     return m;
   }, [pieces]);
 
+  const byKitDest = useMemo(() => {
+    const m = new Map<number, DestKitPiece>();
+    for (const p of kitPieces) m.set(p.destIndex, p);
+    return m;
+  }, [kitPieces]);
+
   const baseByIndex = useMemo(() => {
     const m = new Map<number, PatternRow>();
     for (const p of destCatalog?.patterns ?? []) m.set(p.index, p);
+    return m;
+  }, [destCatalog]);
+
+  const kitBaseByIndex = useMemo(() => {
+    const m = new Map<number, KitRow>();
+    for (const k of destCatalog?.kits ?? []) m.set(k.index, k);
     return m;
   }, [destCatalog]);
 
@@ -133,6 +188,17 @@ export function BuilderApp() {
           pattern: p,
           destIndex: p.index,
           originIndex: p.index,
+        }))
+      );
+      setKitPieces(
+        catalog.kits.map((k) => ({
+          id: `base-kit:${k.index}`,
+          origin: "base" as const,
+          dumpPath: DEST_BASE_PATH,
+          dumpName: name.replace(/\.syx$/i, ""),
+          kit: k,
+          destIndex: k.index,
+          originIndex: k.index,
         }))
       );
     },
@@ -270,6 +336,28 @@ export function BuilderApp() {
       dumpName: selected.name.replace(/\.syx$/i, ""),
       pattern,
     });
+    setHeldKit(null);
+    setComposeReport(null);
+    setComposeError(null);
+  };
+
+  const holdKitFromCatalog = (kit: KitRow) => {
+    if (!selected) return;
+    setHeldKit({
+      dumpPath: selected.name,
+      dumpName: selected.name.replace(/\.syx$/i, ""),
+      kit,
+    });
+    setHeld(null);
+    setComposeReport(null);
+    setComposeError(null);
+  };
+
+  const switchMode = (mode: WorkMode) => {
+    setWorkMode(mode);
+    setHeld(null);
+    setHeldKit(null);
+    setSelectedCell(null);
     setComposeReport(null);
     setComposeError(null);
   };
@@ -290,6 +378,27 @@ export function BuilderApp() {
       });
     });
     setHeld(null);
+    setSelectedCell(to);
+    setComposeReport(null);
+    setComposeError(null);
+  };
+
+  const rearrangeKitDest = (from: number, to: number) => {
+    if (from === to) return;
+    setKitPieces((prev) => {
+      const moving = prev.find((p) => p.destIndex === from);
+      if (!moving) return prev;
+      const target = prev.find((p) => p.destIndex === to);
+      if (!target) {
+        return prev.map((p) => (p.destIndex === from ? { ...p, destIndex: to } : p));
+      }
+      return prev.map((p) => {
+        if (p.destIndex === from) return { ...p, destIndex: to };
+        if (p.destIndex === to) return { ...p, destIndex: from };
+        return p;
+      });
+    });
+    setHeldKit(null);
     setSelectedCell(to);
     setComposeReport(null);
     setComposeError(null);
@@ -325,6 +434,29 @@ export function BuilderApp() {
     setComposeError(null);
   };
 
+  const placeHeldKitAt = (destIndex: number, piece?: HeldKit) => {
+    const src = piece ?? heldKit;
+    if (!src) {
+      setSelectedCell(destIndex);
+      return;
+    }
+    pickSeq.current += 1;
+    const next: DestKitPiece = {
+      id: `${src.dumpPath}:kit:${src.kit.index}:${pickSeq.current}`,
+      origin: "library",
+      dumpPath: src.dumpPath,
+      dumpName: src.dumpName,
+      kit: src.kit,
+      destIndex,
+      originIndex: src.kit.index,
+    };
+    setKitPieces((prev) => [...prev.filter((p) => p.destIndex !== destIndex), next]);
+    setHeldKit(null);
+    setSelectedCell(destIndex);
+    setComposeReport(null);
+    setComposeError(null);
+  };
+
   const moveOrSelectCell = (destIndex: number) => {
     if (skipCellClick.current) {
       skipCellClick.current = false;
@@ -342,6 +474,23 @@ export function BuilderApp() {
     setSelectedCell(destIndex);
   };
 
+  const moveOrSelectKitCell = (destIndex: number) => {
+    if (skipCellClick.current) {
+      skipCellClick.current = false;
+      setSelectedCell(destIndex);
+      return;
+    }
+    if (heldKit) {
+      placeHeldKitAt(destIndex);
+      return;
+    }
+    if (selectedCell !== null && selectedCell !== destIndex && byKitDest.has(selectedCell)) {
+      rearrangeKitDest(selectedCell, destIndex);
+      return;
+    }
+    setSelectedCell(destIndex);
+  };
+
   const clearCell = (destIndex: number) => {
     setPieces((prev) => prev.filter((p) => p.destIndex !== destIndex));
     if (selectedCell === destIndex) setSelectedCell(null);
@@ -349,9 +498,24 @@ export function BuilderApp() {
     setComposeError(null);
   };
 
+  const clearKitCell = (destIndex: number) => {
+    setKitPieces((prev) => prev.filter((p) => p.destIndex !== destIndex));
+    if (selectedCell === destIndex) setSelectedCell(null);
+    setComposeReport(null);
+    setComposeError(null);
+  };
+
+  const placedKitCount = (dumpPath: string, index: number) =>
+    kitPieces.filter((p) => p.dumpPath === dumpPath && p.kit.index === index).length;
+
   const sampleEstimate = useMemo(
     () => pieces.reduce((n, p) => n + p.pattern.sample_refs, 0),
     [pieces]
+  );
+
+  const kitSampleEstimate = useMemo(
+    () => kitPieces.reduce((n, p) => n + p.kit.sample_refs, 0),
+    [kitPieces]
   );
 
   const diff = useMemo(() => {
@@ -373,13 +537,37 @@ export function BuilderApp() {
     return { copies, vacates };
   }, [byDest, baseByIndex]);
 
+  const kitDiff = useMemo(() => {
+    const copies: { path: string; kit: string; dest: string }[] = [];
+    const vacates: string[] = [];
+    for (let i = 0; i < 128; i++) {
+      const piece = byKitDest.get(i);
+      const base = kitBaseByIndex.get(i);
+      if (!kitCellDiffers(i, piece, base)) continue;
+      if (base) vacates.push(destLabel(i));
+      if (piece) {
+        copies.push({
+          path: piece.origin === "base" ? DEST_BASE_PATH : piece.dumpPath,
+          kit: destLabel(piece.originIndex),
+          dest: destLabel(i),
+        });
+      }
+    }
+    return { copies, vacates };
+  }, [byKitDest, kitBaseByIndex]);
+
   const exportFresh = async (mode: "project" | "edits") => {
     if (!templateKind) {
       setComposeError("Baked empty template is missing.");
       return;
     }
-    if (diff.copies.length === 0 && diff.vacates.length === 0) {
-      setComposeError("Nothing differs from dest base — rearrange or place a pattern first.");
+    const activeDiff = workMode === "kit" ? kitDiff : diff;
+    if (activeDiff.copies.length === 0 && activeDiff.vacates.length === 0) {
+      setComposeError(
+        workMode === "kit"
+          ? "Nothing differs from dest base — overwrite a kit slot or rearrange first."
+          : "Nothing differs from dest base — rearrange or place a pattern first."
+      );
       return;
     }
     setComposing(true);
@@ -389,13 +577,23 @@ export function BuilderApp() {
       const res = await fetch("/api/compose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template: templateKind,
-          name: outName,
-          mode,
-          copies: diff.copies,
-          vacates: diff.vacates,
-        }),
+        body: JSON.stringify(
+          workMode === "kit"
+            ? {
+                template: templateKind,
+                name: outName,
+                mode,
+                kitCopies: kitDiff.copies,
+                kitVacates: kitDiff.vacates,
+              }
+            : {
+                template: templateKind,
+                name: outName,
+                mode,
+                copies: diff.copies,
+                vacates: diff.vacates,
+              }
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "compose failed");
@@ -423,7 +621,12 @@ export function BuilderApp() {
   const selectedPiece = selectedCell !== null ? byDest.get(selectedCell) : undefined;
   const selectedVacated =
     selectedCell !== null && !selectedPiece && baseByIndex.has(selectedCell);
+  const selectedKitPiece =
+    selectedCell !== null ? byKitDest.get(selectedCell) : undefined;
+  const selectedKitVacated =
+    selectedCell !== null && !selectedKitPiece && kitBaseByIndex.has(selectedCell);
   const destOccupiedCount = pieces.length;
+  const kitOccupiedCount = kitPieces.length;
   const diffCount = useMemo(() => {
     let n = 0;
     for (let i = 0; i < 128; i++) {
@@ -431,6 +634,16 @@ export function BuilderApp() {
     }
     return n;
   }, [byDest, baseByIndex]);
+  const kitDiffCount = useMemo(() => {
+    let n = 0;
+    for (let i = 0; i < 128; i++) {
+      if (kitCellDiffers(i, byKitDest.get(i), kitBaseByIndex.get(i))) n++;
+    }
+    return n;
+  }, [byKitDest, kitBaseByIndex]);
+  const activeDiffCount = workMode === "kit" ? kitDiffCount : diffCount;
+  const activeSampleEstimate =
+    workMode === "kit" ? kitSampleEstimate : sampleEstimate;
 
   return (
     <div className="flex min-h-full flex-col bg-background">
@@ -442,11 +655,28 @@ export function BuilderApp() {
           Browse dumps. Place on the grid. Export a new project.
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          Composer, not an editor. Drag dest cells to rearrange (vacate or swap).
-          Grey still matches dest base; red is the project differential. Pattern+kit
-          copy only — no kit-only, no live send. Settings-first so samples bind on
-          the box. Restore into disposable RAM; +Drive already holds the files.
+          {workMode === "kit"
+            ? "Kit tab overwrites dest kit slots in place. Patterns that already use that kit number pick up the new analog and samples. Grey matches dest base; red is the diff. Drop onto an occupied cell overwrites. No USB."
+            : "Composer, not an editor. Drag dest cells to rearrange (vacate or swap). Grey still matches dest base; red is the project differential. Pattern+kit copy on this tab. Settings-first so samples bind on the box. Restore into disposable RAM; +Drive already holds the files."}
         </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant={workMode === "patkit" ? "default" : "outline"}
+            className="rounded-[2px] tracking-[0.18em] uppercase"
+            onClick={() => switchMode("patkit")}
+          >
+            PAT+KIT
+          </Button>
+          <Button
+            size="sm"
+            variant={workMode === "kit" ? "default" : "outline"}
+            className="rounded-[2px] tracking-[0.18em] uppercase"
+            onClick={() => switchMode("kit")}
+          >
+            KIT
+          </Button>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-card px-4 py-2 font-sans text-[11px] tracking-[0.18em] uppercase md:px-6">
@@ -459,36 +689,52 @@ export function BuilderApp() {
         <span>
           {silk("KIT")}{" "}
           <span className="tracking-normal text-foreground">
-            {destOccupiedCount}/128
+            {kitOccupiedCount}/128
           </span>
         </span>
         <span>
           {silk("SMP")}{" "}
           <span className="tracking-normal text-foreground">
-            ~{Math.min(sampleEstimate, 128)}/128
+            ~{Math.min(activeSampleEstimate, 128)}/128
           </span>
         </span>
         <span>
           {silk("DIFF")}{" "}
-          <span className="tracking-normal text-foreground">{diffCount}</span>
+          <span className="tracking-normal text-foreground">{activeDiffCount}</span>
         </span>
         <span className="text-primary">settings-first</span>
         <span className="min-w-0 flex-1 truncate tracking-normal text-muted-foreground normal-case">
-          {held
-            ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → empty dest cell`
-            : selectedPiece && selectedCell !== null
-              ? `${destLabel(selectedPiece.destIndex)} ← ${selectedPiece.dumpName} ${selectedPiece.pattern.label}${
-                  cellDiffers(
-                    selectedCell,
-                    selectedPiece,
-                    baseByIndex.get(selectedCell)
-                  )
-                    ? " · red vs dest base"
-                    : " · matches dest base"
-                }`
-              : selectedVacated && selectedCell !== null
-                ? `${destLabel(selectedCell)} vacated vs dest base (red)`
-                : "drag dest cells to rearrange · grey matches dest base · red is the diff"}
+          {workMode === "kit"
+            ? heldKit
+              ? `held ${heldKit.dumpName} ${destLabel(heldKit.kit.index)} ${heldKit.kit.name || "unnamed"} → dest kit (overwrites)`
+              : selectedKitPiece && selectedCell !== null
+                ? `${destLabel(selectedKitPiece.destIndex)} ← ${selectedKitPiece.dumpName} ${destLabel(selectedKitPiece.originIndex)} ${selectedKitPiece.kit.name || ""}${
+                    kitCellDiffers(
+                      selectedCell,
+                      selectedKitPiece,
+                      kitBaseByIndex.get(selectedCell)
+                    )
+                      ? " · red vs dest base"
+                      : " · matches dest base"
+                  }`
+                : selectedKitVacated && selectedCell !== null
+                  ? `${destLabel(selectedCell)} kit vacated vs dest base (red)`
+                  : "kit dest overwrites in place · grey matches dest base · red is the diff"
+            : held
+              ? `held ${held.dumpName} ${held.pattern.label} ${held.pattern.kit_name || ""} → empty dest cell`
+              : selectedPiece && selectedCell !== null
+                ? `${destLabel(selectedPiece.destIndex)} ← ${selectedPiece.dumpName} ${selectedPiece.pattern.label}${
+                    cellDiffers(
+                      selectedCell,
+                      selectedPiece,
+                      baseByIndex.get(selectedCell)
+                    )
+                      ? " · red vs dest base"
+                      : " · matches dest base"
+                  }`
+                : selectedVacated && selectedCell !== null
+                  ? `${destLabel(selectedCell)} vacated vs dest base (red)`
+                  : "drag dest cells to rearrange · grey matches dest base · red is the diff"}
         </span>
       </div>
 
@@ -594,11 +840,19 @@ export function BuilderApp() {
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
-              {selected ? `Kit / Pat  ${selected.name.replace(/\.syx$/i, "")}` : "Kit / Pat"}
+              {workMode === "kit"
+                ? selected
+                  ? `Kit list  ${selected.name.replace(/\.syx$/i, "")}`
+                  : "Kit list"
+                : selected
+                  ? `Kit / Pat  ${selected.name.replace(/\.syx$/i, "")}`
+                  : "Kit / Pat"}
             </CardTitle>
             <CardDescription>
               {catalog
-                ? `${catalog.patterns.length} nonempty · ${catalog.sample_slots_used}/128 sample slots`
+                ? workMode === "kit"
+                  ? `${catalog.kits.length} kits · ${catalog.sample_slots_used}/128 sample slots`
+                  : `${catalog.patterns.length} nonempty · ${catalog.sample_slots_used}/128 sample slots`
                 : "Select a dump to catalog it."}
             </CardDescription>
           </CardHeader>
@@ -616,74 +870,139 @@ export function BuilderApp() {
                 Pick a library dump on the left.
               </p>
             )}
-            {catalog && catalog.patterns.length === 0 && !loadingCatalog && (
-              <p className="text-sm text-muted-foreground">
-                No nonempty patterns. Empty templates are the compose base.
-              </p>
-            )}
+            {workMode === "patkit" &&
+              catalog &&
+              catalog.patterns.length === 0 &&
+              !loadingCatalog && (
+                <p className="text-sm text-muted-foreground">
+                  No nonempty patterns. Empty templates are the compose base.
+                </p>
+              )}
+            {workMode === "kit" &&
+              catalog &&
+              catalog.kits.length === 0 &&
+              !loadingCatalog && (
+                <p className="text-sm text-muted-foreground">
+                  No named kits or sample-bearing kits in this dump.
+                </p>
+              )}
             <ScrollArea className="h-[min(48vh,380px)]">
-              <ul className="flex flex-col gap-px pr-2">
-                {catalog?.patterns.map((p) => {
-                  const n = selected ? placedCount(selected.path, p.label) : 0;
-                  const isHeld =
-                    held?.dumpPath === selected?.path &&
-                    held?.pattern.label === p.label;
-                  return (
-                    <li
-                      key={p.label}
-                      draggable={p.kit !== null}
-                      onDragStart={(e) => {
-                        if (!selected || p.kit === null) return;
-                        e.dataTransfer.setData(
-                          "application/json",
-                          JSON.stringify({
-                            kind: "catalog",
-                            dumpPath: selected.name,
-                            dumpName: selected.name.replace(/\.syx$/i, ""),
-                            pattern: p,
-                          } satisfies DragPayload)
-                        );
-                        holdFromCatalog(p);
-                      }}
-                      className={`flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
-                        isHeld ? "bg-primary/20" : "hover:bg-muted/60"
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-baseline gap-2">
-                          <span className="font-medium">{p.label}</span>
-                          <span className="truncate">
-                            {p.kit_name || "unnamed kit"}
-                            {p.kit !== null ? (
-                              <span className="text-muted-foreground">
-                                {" "}
-                                · kit {p.kit}
-                              </span>
-                            ) : (
-                              <span className="text-destructive"> · unsaved kit</span>
-                            )}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {p.trigs} trigs · {p.sample_refs} sample refs
-                          {p.smp_nr_plocks > 0
-                            ? ` · ${p.smp_nr_plocks} SMP_NR plocks`
-                            : ""}
-                          {n > 0 ? ` · on grid ×${n}` : ""}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={isHeld ? "default" : n > 0 ? "secondary" : "outline"}
-                        disabled={p.kit === null}
-                        onClick={() => holdFromCatalog(p)}
+              {workMode === "kit" ? (
+                <ul className="flex flex-col gap-px pr-2">
+                  {catalog?.kits.map((k) => {
+                    const n = selected ? placedKitCount(selected.name, k.index) : 0;
+                    const isHeld =
+                      heldKit?.dumpPath === selected?.name &&
+                      heldKit?.kit.index === k.index;
+                    return (
+                      <li
+                        key={k.index}
+                        draggable
+                        onDragStart={(e) => {
+                          if (!selected) return;
+                          e.dataTransfer.setData(
+                            "application/json",
+                            JSON.stringify({
+                              kind: "catalog-kit",
+                              dumpPath: selected.name,
+                              dumpName: selected.name.replace(/\.syx$/i, ""),
+                              kit: k,
+                            } satisfies DragPayload)
+                          );
+                          holdKitFromCatalog(k);
+                        }}
+                        className={`flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
+                          isHeld ? "bg-primary/20" : "hover:bg-muted/60"
+                        }`}
                       >
-                        {isHeld ? "held" : "add"}
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-baseline gap-2">
+                            <span className="font-medium">{destLabel(k.index)}</span>
+                            <span className="truncate">
+                              {k.name || "unnamed kit"}
+                              <span className="text-muted-foreground"> · kit {k.index}</span>
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {k.sample_refs} sample refs
+                            {n > 0 ? ` · on grid ×${n}` : ""}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={isHeld ? "default" : n > 0 ? "secondary" : "outline"}
+                          onClick={() => holdKitFromCatalog(k)}
+                        >
+                          {isHeld ? "held" : "add"}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <ul className="flex flex-col gap-px pr-2">
+                  {catalog?.patterns.map((p) => {
+                    const n = selected ? placedCount(selected.path, p.label) : 0;
+                    const isHeld =
+                      held?.dumpPath === selected?.path &&
+                      held?.pattern.label === p.label;
+                    return (
+                      <li
+                        key={p.label}
+                        draggable={p.kit !== null}
+                        onDragStart={(e) => {
+                          if (!selected || p.kit === null) return;
+                          e.dataTransfer.setData(
+                            "application/json",
+                            JSON.stringify({
+                              kind: "catalog",
+                              dumpPath: selected.name,
+                              dumpName: selected.name.replace(/\.syx$/i, ""),
+                              pattern: p,
+                            } satisfies DragPayload)
+                          );
+                          holdFromCatalog(p);
+                        }}
+                        className={`flex items-center justify-between gap-2 rounded-[2px] px-2 py-1.5 ${
+                          isHeld ? "bg-primary/20" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-baseline gap-2">
+                            <span className="font-medium">{p.label}</span>
+                            <span className="truncate">
+                              {p.kit_name || "unnamed kit"}
+                              {p.kit !== null ? (
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  · kit {p.kit}
+                                </span>
+                              ) : (
+                                <span className="text-destructive"> · unsaved kit</span>
+                              )}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {p.trigs} trigs · {p.sample_refs} sample refs
+                            {p.smp_nr_plocks > 0
+                              ? ` · ${p.smp_nr_plocks} SMP_NR plocks`
+                              : ""}
+                            {n > 0 ? ` · on grid ×${n}` : ""}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={isHeld ? "default" : n > 0 ? "secondary" : "outline"}
+                          disabled={p.kit === null}
+                          onClick={() => holdFromCatalog(p)}
+                        >
+                          {isHeld ? "held" : "add"}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </ScrollArea>
           </CardContent>
         </Card>
@@ -706,14 +1025,15 @@ export function BuilderApp() {
         >
           <CardHeader className="border-b">
             <CardTitle className="text-[10px] tracking-[0.28em] uppercase">
-              Pat dest
+              {workMode === "kit" ? "Kit dest" : "Pat dest"}
             </CardTitle>
             <CardDescription>
-              Drag occupied cells to rearrange (swap if target is full). Grey =
-              matches dest base. Red = differs (new, moved, or vacated). Base:{" "}
+              {workMode === "kit"
+                ? "Drop overwrites the dest kit slot (patterns already using that kit pick up the new analog). Drag dest cells to rearrange. Grey = dest base. Red = diff. Base: "
+                : "Drag occupied cells to rearrange (swap if target is full). Grey = matches dest base. Red = differs (new, moved, or vacated). Base: "}
               {templateName}
               {templateKind === "custom" ? " (override)" : ""}
-              {diffCount > 0 ? ` · ${diffCount} red` : ""}
+              {activeDiffCount > 0 ? ` · ${activeDiffCount} red` : ""}
               . New file only.
             </CardDescription>
           </CardHeader>
@@ -765,11 +1085,54 @@ export function BuilderApp() {
                   <BankRow
                     key={bank}
                     bank={bank}
-                    byDest={byDest}
-                    baseByIndex={baseByIndex}
                     selectedCell={selectedCell}
-                    held={held}
-                    onCell={(i) => moveOrSelectCell(i)}
+                    cell={(i) => {
+                      if (workMode === "kit") {
+                        const piece = byKitDest.get(i);
+                        const base = kitBaseByIndex.get(i);
+                        const differs = kitCellDiffers(i, piece, base);
+                        const vacated = !piece && !!base;
+                        return {
+                          occupied: !!piece,
+                          differs,
+                          vacated,
+                          title: piece
+                            ? `${destLabel(i)} ← ${piece.dumpName} ${destLabel(piece.originIndex)}${
+                                differs ? " · red vs dest base" : " · matches dest base"
+                              }`
+                            : vacated
+                              ? `${destLabel(i)} kit vacated vs dest base`
+                              : `${destLabel(i)} empty kit`,
+                          label: piece
+                            ? (piece.kit.name || destLabel(piece.originIndex)).slice(0, 3)
+                            : "",
+                          dropHint: !!heldKit,
+                        };
+                      }
+                      const piece = byDest.get(i);
+                      const base = baseByIndex.get(i);
+                      const differs = cellDiffers(i, piece, base);
+                      const vacated = !piece && !!base;
+                      return {
+                        occupied: !!piece,
+                        differs,
+                        vacated,
+                        title: piece
+                          ? `${destLabel(i)} ← ${piece.dumpName} ${piece.pattern.label}${
+                              differs ? " · red vs dest base" : " · matches dest base"
+                            }`
+                          : vacated
+                            ? `${destLabel(i)} vacated vs dest base`
+                            : `${destLabel(i)} empty`,
+                        label: piece
+                          ? (piece.pattern.kit_name || piece.pattern.label).slice(0, 3)
+                          : "",
+                        dropHint: !!held && !piece,
+                      };
+                    }}
+                    onCell={(i) =>
+                      workMode === "kit" ? moveOrSelectKitCell(i) : moveOrSelectCell(i)
+                    }
                     onDestDragEnd={() => {
                       skipCellClick.current = true;
                       window.setTimeout(() => {
@@ -777,14 +1140,29 @@ export function BuilderApp() {
                       }, 50);
                     }}
                     onDropPayload={(i, payload) => {
+                      if (workMode === "kit") {
+                        if (payload.kind === "dest-kit") rearrangeKitDest(payload.destIndex, i);
+                        else if (payload.kind === "catalog-kit") placeHeldKitAt(i, payload);
+                        return;
+                      }
                       if (payload.kind === "dest") rearrangeDest(payload.destIndex, i);
-                      else placeHeldAt(i, payload);
+                      else if (payload.kind === "catalog") placeHeldAt(i, payload);
                     }}
+                    dragKind={workMode === "kit" ? "dest-kit" : "dest"}
+                    heldFallback={
+                      workMode === "kit"
+                        ? heldKit
+                          ? { kind: "catalog-kit", ...heldKit }
+                          : null
+                        : held
+                          ? { kind: "catalog", ...held }
+                          : null
+                    }
                   />
                 ))}
               </div>
             </div>
-            {selectedPiece && (
+            {workMode === "patkit" && selectedPiece && (
               <div className="flex items-start justify-between gap-2 border border-border bg-muted px-2 py-2 text-xs">
                 <p>
                   {destLabel(selectedPiece.destIndex)} ← {selectedPiece.dumpName}{" "}
@@ -804,11 +1182,41 @@ export function BuilderApp() {
                 </Button>
               </div>
             )}
-            {selectedVacated && selectedCell !== null && (
+            {workMode === "patkit" && selectedVacated && selectedCell !== null && (
               <div className="border border-primary bg-primary/15 px-2 py-2 text-xs">
                 <p>
                   {destLabel(selectedCell)} vacated vs dest base (red empty). Drag
                   something here or leave empty.
+                </p>
+              </div>
+            )}
+            {workMode === "kit" && selectedKitPiece && (
+              <div className="flex items-start justify-between gap-2 border border-border bg-muted px-2 py-2 text-xs">
+                <p>
+                  {destLabel(selectedKitPiece.destIndex)} ← {selectedKitPiece.dumpName}{" "}
+                  {destLabel(selectedKitPiece.originIndex)} ·{" "}
+                  {selectedKitPiece.kit.name || "unnamed"}
+                  {selectedKitPiece.origin === "base" &&
+                  selectedCell !== null &&
+                  matchesKitBase(selectedKitPiece, selectedCell)
+                    ? " · grey dest base"
+                    : " · red vs dest base"}
+                </p>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => clearKitCell(selectedKitPiece.destIndex)}
+                >
+                  clear
+                </Button>
+              </div>
+            )}
+            {workMode === "kit" && selectedKitVacated && selectedCell !== null && (
+              <div className="border border-primary bg-primary/15 px-2 py-2 text-xs">
+                <p>
+                  {destLabel(selectedCell)} kit vacated vs dest base (red empty).
+                  Patterns still pointing at this kit number will play an empty
+                  kit. Drop to overwrite or leave empty.
                 </p>
               </div>
             )}
@@ -824,14 +1232,16 @@ export function BuilderApp() {
             <p className="text-xs text-muted-foreground">
               Downloads a .syx. This app never talks to the Rytm — receive the
               file in your sysex editor. Project = whole dump into empty RAM.
-              Edits = red cells only onto dest-base already in RAM. Pattern+kit
-              together.
+              Edits = red cells only onto dest-base already in RAM.{" "}
+              {workMode === "kit"
+                ? "This tab writes kits only (no pattern objects)."
+                : "This tab writes pattern+kit together."}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button
                 className="rounded-[2px] flex-1"
                 onClick={() => void exportFresh("project")}
-                disabled={composing || diffCount === 0}
+                disabled={composing || activeDiffCount === 0}
               >
                 {composing ? "Composing…" : "Download project .syx"}
               </Button>
@@ -839,7 +1249,7 @@ export function BuilderApp() {
                 className="rounded-[2px] flex-1"
                 variant="secondary"
                 onClick={() => void exportFresh("edits")}
-                disabled={composing || diffCount === 0}
+                disabled={composing || activeDiffCount === 0}
               >
                 {composing ? "Composing…" : "Download edits .syx"}
               </Button>
@@ -863,22 +1273,22 @@ export function BuilderApp() {
 
 function BankRow({
   bank,
-  byDest,
-  baseByIndex,
   selectedCell,
-  held,
+  cell,
   onCell,
   onDestDragEnd,
   onDropPayload,
+  dragKind,
+  heldFallback,
 }: {
   bank: number;
-  byDest: Map<number, DestPiece>;
-  baseByIndex: Map<number, PatternRow>;
   selectedCell: number | null;
-  held: Held | null;
+  cell: (i: number) => CellView;
   onCell: (i: number) => void;
   onDestDragEnd: () => void;
   onDropPayload: (i: number, payload: DragPayload) => void;
+  dragKind: "dest" | "dest-kit";
+  heldFallback: DragPayload | null;
 }) {
   const letter = String.fromCharCode(65 + bank);
   return (
@@ -888,40 +1298,27 @@ function BankRow({
       </div>
       {Array.from({ length: 16 }, (_, s) => {
         const i = bank * 16 + s;
-        const piece = byDest.get(i);
-        const base = baseByIndex.get(i);
+        const view = cell(i);
         const selected = selectedCell === i;
-        const differs = cellDiffers(i, piece, base);
-        const vacated = !piece && !!base;
-        const title = piece
-          ? `${destLabel(i)} ← ${piece.dumpName} ${piece.pattern.label}${
-              differs ? " · red vs dest base" : " · matches dest base"
-            }`
-          : vacated
-            ? `${destLabel(i)} vacated vs dest base`
-            : `${destLabel(i)} empty`;
-        const label = piece
-          ? (piece.pattern.kit_name || piece.pattern.label).slice(0, 3)
-          : "";
-        const tone = piece
-          ? differs
+        const tone = view.occupied
+          ? view.differs
             ? "border-primary bg-primary text-primary-foreground"
             : "border-muted-foreground bg-secondary text-foreground"
-          : vacated
+          : view.vacated
             ? "border-primary bg-primary/35 text-primary-foreground"
             : "border-border bg-background text-muted-foreground";
         return (
           <button
             key={i}
             type="button"
-            draggable={!!piece}
-            title={title}
+            draggable={view.occupied}
+            title={view.title}
             onClick={() => onCell(i)}
             onDragStart={(e) => {
-              if (!piece) return;
+              if (!view.occupied) return;
               e.dataTransfer.setData(
                 "application/json",
-                JSON.stringify({ kind: "dest", destIndex: i } satisfies DragPayload)
+                JSON.stringify({ kind: dragKind, destIndex: i } satisfies DragPayload)
               );
               e.dataTransfer.effectAllowed = "move";
             }}
@@ -935,26 +1332,30 @@ function BankRow({
               e.stopPropagation();
               const raw = e.dataTransfer.getData("application/json");
               if (!raw) {
-                if (held) onDropPayload(i, { kind: "catalog", ...held });
+                if (heldFallback) onDropPayload(i, heldFallback);
                 return;
               }
               try {
-                const parsed = JSON.parse(raw) as DragPayload | Held;
-                if ("kind" in parsed && (parsed.kind === "dest" || parsed.kind === "catalog")) {
+                const parsed = JSON.parse(raw) as DragPayload;
+                if (
+                  parsed.kind === "dest" ||
+                  parsed.kind === "catalog" ||
+                  parsed.kind === "dest-kit" ||
+                  parsed.kind === "catalog-kit"
+                ) {
                   onDropPayload(i, parsed);
-                } else {
-                  const legacy = parsed as Held;
-                  onDropPayload(i, { kind: "catalog", ...legacy });
+                } else if (heldFallback) {
+                  onDropPayload(i, heldFallback);
                 }
               } catch {
-                if (held) onDropPayload(i, { kind: "catalog", ...held });
+                if (heldFallback) onDropPayload(i, heldFallback);
               }
             }}
             className={`aspect-square min-h-[1.15rem] rounded-[2px] border text-[8px] leading-none ${tone} ${
               selected ? "outline outline-1 outline-offset-1 outline-white" : ""
-            } ${held && !piece ? "hover:border-primary" : ""}`}
+            } ${view.dropHint ? "hover:border-primary" : ""}`}
           >
-            {label}
+            {view.label}
           </button>
         );
       })}

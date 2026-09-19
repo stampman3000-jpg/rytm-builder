@@ -29,10 +29,18 @@ pub struct CopyReport {
     pub plock_rewrites: u32,
 }
 
+pub struct KitCopyReport {
+    pub src_path: String,
+    pub src_kit: u8,
+    pub src_kit_name: String,
+    pub dest_kit: u8,
+    pub sample_map: Vec<RemapLine>,
+}
+
 pub fn parse_copy_spec(s: &str) -> Result<CopySpec, String> {
     let (left, last) = s
         .rsplit_once(':')
-        .ok_or_else(|| format!("--copy wants PATH:PATTERN or PATH:PATTERN:DEST (got {s:?})"))?;
+        .ok_or_else(|| format!("copy spec wants PATH:SLOT or PATH:SLOT:DEST (got {s:?})"))?;
     if let Some((path, mid)) = left.rsplit_once(':') {
         if parse_pattern_index(mid).is_ok() && parse_pattern_index(last).is_ok() {
             return Ok(CopySpec {
@@ -49,13 +57,18 @@ pub fn parse_copy_spec(s: &str) -> Result<CopySpec, String> {
     })
 }
 
-fn needed_sample_slots(kit: &[u8], pattern: &[u8]) -> BTreeSet<u8> {
+fn needed_kit_sample_slots(kit: &[u8]) -> BTreeSet<u8> {
     let mut set = BTreeSet::new();
     for (_, nr) in kit_sample_nrs(kit) {
         if (1..=127).contains(&nr) {
             set.insert(nr);
         }
     }
+    set
+}
+
+fn needed_sample_slots(kit: &[u8], pattern: &[u8]) -> BTreeSet<u8> {
+    let mut set = needed_kit_sample_slots(kit);
     // SMP_NR plocks
     let base = PLOCK_SEQS;
     for i in 0..NUM_PLOCK_SEQS {
@@ -137,6 +150,65 @@ fn first_free_kit(dest: &Project) -> Result<u8, String> {
     Err("no free destination kit slot".into())
 }
 
+fn kit_is_empty(raw: &[u8]) -> bool {
+    kit_name(raw).is_empty() && kit_sample_nrs(raw).iter().all(|(_, n)| *n == 0)
+}
+
+fn first_empty_kit(dest: &Project) -> Result<u8, String> {
+    for nr in 0..128u8 {
+        if let Some(k) = find_raw(dest, OBJ_KIT, nr) {
+            if kit_is_empty(&k.raw) {
+                return Ok(nr);
+            }
+        }
+    }
+    Err("no empty destination kit slot".into())
+}
+
+fn bind_samples(
+    src_path: &str,
+    src_kit_nr: u8,
+    src_settings: &[u8],
+    dest: &mut Project,
+    dest_settings_idx: usize,
+    needed: &BTreeSet<u8>,
+) -> Result<([i16; 128], Vec<RemapLine>), String> {
+    let mut remap = [-1i16; 128];
+    let mut sample_map = Vec::new();
+    let mut search_from = 1usize;
+    for &src_slot in needed {
+        let fp = settings_row(src_settings, src_slot as usize)
+            .ok_or_else(|| format!("src settings missing slot {src_slot}"))?;
+        if slot_unused(fp) {
+            return Err(format!(
+                "{src_path} kit {src_kit_nr} references sample slot {src_slot} but settings row is empty"
+            ));
+        }
+        let fp_owned = fp.to_vec();
+        let dest_raw = &dest.objects[dest_settings_idx].raw;
+        let (dest_slot, action) = if let Some(existing) = find_fingerprint(dest_raw, &fp_owned) {
+            (existing, "REUSE")
+        } else {
+            let slot = next_free_slot(dest_raw, search_from)?;
+            search_from = slot as usize + 1;
+            (slot, "ALLOC")
+        };
+        if action == "ALLOC" {
+            let row =
+                settings_row_mut(&mut dest.objects[dest_settings_idx].raw, dest_slot as usize)
+                    .unwrap();
+            row.copy_from_slice(&fp_owned);
+        }
+        remap[src_slot as usize] = i16::from(dest_slot);
+        sample_map.push(RemapLine {
+            src_slot,
+            dest_slot,
+            action,
+        });
+    }
+    Ok((remap, sample_map))
+}
+
 fn dest_kit_for_slot(dest: &Project, dest_pat: u8) -> Result<u8, String> {
     let used = nonempty_pattern_kits(dest);
     if find_raw(dest, OBJ_KIT, dest_pat).is_some() && !used[dest_pat as usize] {
@@ -144,6 +216,35 @@ fn dest_kit_for_slot(dest: &Project, dest_pat: u8) -> Result<u8, String> {
     }
     // Nonempty dest-base projects don't keep kit N free for pattern N.
     first_free_kit(dest)
+}
+
+/// Replace dest kit with an empty kit object. Patterns that still point at this
+/// kit number will play the emptied analog (same as clearing a dest kit cell).
+pub fn vacate_kit(dest: &mut Project, dest_kit: u8) -> Result<(), String> {
+    let Some(cur) = find_raw(dest, OBJ_KIT, dest_kit) else {
+        return Err(format!("dest missing kit {}", pattern_label(dest_kit)));
+    };
+    if kit_is_empty(&cur.raw) {
+        return Ok(());
+    }
+    let empty_raw = dest
+        .objects
+        .iter()
+        .find(|o| {
+            o.obj_type == OBJ_KIT && o.obj_nr != u16::from(dest_kit) && kit_is_empty(&o.raw)
+        })
+        .map(|o| o.raw.clone())
+        .ok_or_else(|| "no empty dest kit to use as a vacate donor".to_string())?;
+    let dk = find_raw_mut(dest, OBJ_KIT, dest_kit).ok_or_else(|| {
+        format!("dest missing kit {}", pattern_label(dest_kit))
+    })?;
+    if dk.raw.len() != empty_raw.len() {
+        return Err("dest kit size mismatch while vacating".into());
+    }
+    dk.raw = empty_raw;
+    dk.obj_nr = u16::from(dest_kit);
+    encode_object(dk)?;
+    Ok(())
 }
 
 /// Replace dest pattern `dest_pat` with an empty pattern object (trigs = 0).
@@ -177,7 +278,7 @@ pub fn vacate_pattern(dest: &mut Project, dest_pat: u8) -> Result<(), String> {
     Ok(())
 }
 
-fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
+fn apply_kit_sample_remap(kit: &mut [u8], remap: &[i16; 128]) {
     for t in 0..KIT_TRACK_COUNT {
         let off = KIT_TRACKS + t * SOUND_RAW_SZ + SOUND_SAMPLE_NR;
         if off >= kit.len() {
@@ -191,6 +292,10 @@ fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) ->
             }
         }
     }
+}
+
+fn apply_sample_remap(kit: &mut [u8], pattern: &mut [u8], remap: &[i16; 128]) -> u32 {
+    apply_kit_sample_remap(kit, remap);
     let mut plocks = 0u32;
     for i in 0..NUM_PLOCK_SEQS {
         let off = PLOCK_SEQS + i * PLOCK_SEQ_SZ;
@@ -273,11 +378,6 @@ pub fn copy_pattern_kit(
     };
 
     let needed = needed_sample_slots(&sk.raw, &sp.raw);
-    let mut remap = [-1i16; 128];
-    let mut sample_map = Vec::new();
-    let mut search_from = 1usize;
-
-    // Settings live on dest object — clone rows then write back.
     let dest_settings_idx = dest
         .objects
         .iter()
@@ -286,38 +386,14 @@ pub fn copy_pattern_kit(
     if dest.objects[dest_settings_idx].raw.len() != SETTINGS_RAW_SZ {
         return Err("destination settings raw size mismatch".into());
     }
-
-    for src_slot in needed {
-        let fp = settings_row(&ss.raw, src_slot as usize)
-            .ok_or_else(|| format!("src settings missing slot {src_slot}"))?;
-        if slot_unused(fp) {
-            return Err(format!(
-                "{} kit {src_kit_nr} references sample slot {src_slot} but settings row is empty",
-                src.path
-            ));
-        }
-        let fp_owned = fp.to_vec();
-        let dest_raw = &dest.objects[dest_settings_idx].raw;
-        let (dest_slot, action) = if let Some(existing) = find_fingerprint(dest_raw, &fp_owned) {
-            (existing, "REUSE")
-        } else {
-            let slot = next_free_slot(dest_raw, search_from)?;
-            search_from = slot as usize + 1;
-            (slot, "ALLOC")
-        };
-        if action == "ALLOC" {
-            let row =
-                settings_row_mut(&mut dest.objects[dest_settings_idx].raw, dest_slot as usize)
-                    .unwrap();
-            row.copy_from_slice(&fp_owned);
-        }
-        remap[src_slot as usize] = i16::from(dest_slot);
-        sample_map.push(RemapLine {
-            src_slot,
-            dest_slot,
-            action,
-        });
-    }
+    let (remap, sample_map) = bind_samples(
+        &src.path,
+        src_kit_nr,
+        &ss.raw,
+        dest,
+        dest_settings_idx,
+        &needed,
+    )?;
 
     let mut kit_raw = sk.raw.clone();
     let mut pat_raw = sp.raw.clone();
@@ -360,11 +436,82 @@ pub fn copy_pattern_kit(
     })
 }
 
+/// Overwrite dest kit with a source kit. Does not write patterns.
+/// Patterns that already point at that kit index pick up the new analog/samples.
+/// Occupied dest kits are overwritten (unlike PAT+KIT, which refuses a full cell).
+/// `None` dest = first empty kit (legacy auto-pack).
+pub fn copy_kit(
+    src: &Project,
+    dest: &mut Project,
+    src_kit: u8,
+    dest_kit: Option<u8>,
+) -> Result<KitCopyReport, String> {
+    let sk = find_raw(src, OBJ_KIT, src_kit)
+        .ok_or_else(|| format!("{}: missing kit {src_kit}", src.path))?;
+    if sk.raw.len() != KIT_RAW_SZ {
+        return Err(format!("kit raw size {} != {KIT_RAW_SZ}", sk.raw.len()));
+    }
+    let ss =
+        find_raw(src, OBJ_SETTINGS, 0).ok_or_else(|| format!("{}: missing settings", src.path))?;
+    let dest_kit = match dest_kit {
+        Some(n) => {
+            find_raw(dest, OBJ_KIT, n).ok_or_else(|| {
+                format!("dest missing kit {}", pattern_label(n))
+            })?;
+            n
+        }
+        None => first_empty_kit(dest)?,
+    };
+
+    let needed = needed_kit_sample_slots(&sk.raw);
+    let dest_settings_idx = dest
+        .objects
+        .iter()
+        .position(|o| o.obj_type == OBJ_SETTINGS)
+        .ok_or_else(|| "destination missing settings".to_string())?;
+    if dest.objects[dest_settings_idx].raw.len() != SETTINGS_RAW_SZ {
+        return Err("destination settings raw size mismatch".into());
+    }
+    let (remap, sample_map) = bind_samples(
+        &src.path,
+        src_kit,
+        &ss.raw,
+        dest,
+        dest_settings_idx,
+        &needed,
+    )?;
+
+    let mut kit_raw = sk.raw.clone();
+    apply_kit_sample_remap(&mut kit_raw, &remap);
+
+    {
+        let dk = find_raw_mut(dest, OBJ_KIT, dest_kit)
+            .ok_or_else(|| format!("dest missing kit {dest_kit}"))?;
+        if dk.raw.len() != kit_raw.len() {
+            return Err("dest kit size mismatch".into());
+        }
+        dk.raw = kit_raw;
+        dk.obj_nr = u16::from(dest_kit);
+        encode_object(dk)?;
+    }
+    encode_object(&mut dest.objects[dest_settings_idx])?;
+
+    Ok(KitCopyReport {
+        src_path: src.path.clone(),
+        src_kit,
+        src_kit_name: kit_name(&sk.raw),
+        dest_kit,
+        sample_map,
+    })
+}
+
 pub fn format_report(
     template: &str,
     out: &str,
     copies: &[CopyReport],
     vacated: &[u8],
+    kit_copies: &[KitCopyReport],
+    vacated_kits: &[u8],
     check: &crate::project::ExportCheck,
     sources_unchanged: bool,
     sample_slots: usize,
@@ -388,6 +535,10 @@ pub fn format_report(
         let labels: Vec<String> = vacated.iter().copied().map(pattern_label).collect();
         s.push_str(&format!("  vacate:   {}\n", labels.join(", ")));
     }
+    if !vacated_kits.is_empty() {
+        let labels: Vec<String> = vacated_kits.iter().copied().map(pattern_label).collect();
+        s.push_str(&format!("  vacate_kit: {}\n", labels.join(", ")));
+    }
     s.push('\n');
     for (i, c) in copies.iter().enumerate() {
         s.push_str(&format!(
@@ -404,6 +555,28 @@ pub fn format_report(
             "    trigs={} plock_smp_nr_rewrites={}\n",
             c.trigs, c.plock_rewrites
         ));
+        if c.sample_map.is_empty() {
+            s.push_str("    samples: none\n");
+        }
+        for m in &c.sample_map {
+            s.push_str(&format!(
+                "    sample src {} -> dest {} ({})\n",
+                m.src_slot, m.dest_slot, m.action
+            ));
+        }
+        s.push('\n');
+    }
+    for (i, c) in kit_copies.iter().enumerate() {
+        s.push_str(&format!(
+            "[kit {}] {} kit {} '{}'  ->  dest {} (kit {})\n",
+            i + 1,
+            c.src_path,
+            c.src_kit,
+            c.src_kit_name,
+            pattern_label(c.dest_kit),
+            c.dest_kit
+        ));
+        s.push_str("    patterns not written; dest kit slot overwritten in place\n");
         if c.sample_map.is_empty() {
             s.push_str("    samples: none\n");
         }
@@ -434,7 +607,7 @@ pub fn format_edits_lines(
     }
     let mut s = String::new();
     s.push_str(&format!("  edits:    {path}\n"));
-    s.push_str("  edits_order: settings, kits, patterns (no songs/globals)\n");
+    s.push_str("  edits_order: settings, kits, patterns (no songs/globals; kit-only omits patterns)\n");
     s.push_str(&format!(
         "  edits_messages: {}  bytes: {}  md5: {}\n",
         check.messages, check.bytes, check.md5

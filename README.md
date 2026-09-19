@@ -25,7 +25,7 @@ cargo build
 cd web && npm install && npm run dev
 ```
 
-Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), drag dest cells to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). This tool never talks USB. Restore model: receive the file in a sysex editor.
+Local app at http://127.0.0.1:43147 — drop dumps into the app library, place pattern+kit pairs on an A–H × 1–16 dest grid (empty cells stay empty), or switch to the **KIT** tab to overwrite dest kit slots in place (patterns that already use that kit pick up the new analog). Drag dest cells to rearrange (vacate or swap). Grey matches dest base; red is the differential. **Download project** writes a whole-project `.syx` (empty/disposable RAM). **Download edits** writes settings + changed kits/patterns only (dest-base already in RAM). Kit-tab edits omit pattern objects. This tool never talks USB. Restore model: receive the file in a sysex editor.
 
 ## Catalog a dump
 
@@ -37,7 +37,7 @@ Prints nonempty patterns (A01–H16), linked kit name/index, trig counts, and ki
 
 ## Compose a fresh project
 
-Use an **empty whole-project dump** as `--template` (a newly created Rytm project, saved and dumped — not a file this tool “clears”). Copy one or more `PATH:PATTERN` or `PATH:PATTERN:DEST` pairs. With no dest, slots fill from the first empty pattern (legacy). With dest (e.g. `C04`), that cell is written and others stay empty. `--vacate A03` empties a dest pattern (needed when rearranging dest-base cells).
+Use an **empty whole-project dump** as `--template` (a newly created Rytm project, saved and dumped — not a file this tool “clears”). Copy one or more `PATH:PATTERN` or `PATH:PATTERN:DEST` pairs. With no dest, slots fill from the first empty pattern (legacy). With dest (e.g. `C04`), that cell is written and others stay empty. `--vacate A03` empties a dest pattern (needed when rearranging dest-base cells). `--copy-kit PATH:KIT:DEST` overwrites dest kit `DEST` (A01–H16 = kit 0–127) and remaps sample fingerprints; patterns are not written. Occupied dest kits are overwritten so patterns already using that kit pick up the new analog. `--vacate-kit` empties a dest kit object.
 
 ```bash
 cargo run -- compose \
@@ -46,6 +46,15 @@ cargo run -- compose \
   --copy /path/to/Untitled-1.syx:A03:C04 \
   --copy /path/to/Untitled.syx:A01:C05 \
   --report /path/to/Fresh.txt
+```
+
+Kit-only (no pattern write):
+
+```bash
+cargo run -- compose \
+  --template /path/to/Untitled.syx \
+  --edits-out /path/to/KitSwap__edits.syx \
+  --copy-kit /path/to/Untitled-1.syx:A03:A01
 ```
 
 Rules the tool will not bend:
@@ -76,7 +85,7 @@ This app never talks to the device. Receive the downloaded `.syx` in Transfer / 
 
 ## What this version does not do
 
-No live USB, no firmware SysEx, no Transfer `.arpj`, no sample upload, no song editing, no in-place project surgery, no sample names.
+No live USB, no firmware SysEx, no Transfer `.arpj`, no sample upload, no song editing, no in-place project surgery, no sample names. Pattern-only copy is not in this build (kit tab is).
 
 ## Proven fixture (Play 1)
 

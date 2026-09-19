@@ -4,7 +4,8 @@ mod layout;
 mod project;
 
 use compose::{
-    copy_pattern_kit, format_edits_lines, format_report, parse_copy_spec, vacate_pattern,
+    copy_kit, copy_pattern_kit, format_edits_lines, format_report, parse_copy_spec, vacate_kit,
+    vacate_pattern,
 };
 use layout::parse_pattern_index;
 use project::{
@@ -19,9 +20,14 @@ fn usage() -> ! {
         "rytm-builder — compose a fresh Analog Rytm project .syx (no overwrite, no MIDI)\n\n\
          rytm-builder catalog [--json] <dump.syx>\n\
          rytm-builder compose --template <base.syx> --out <new.syx> --copy <dump.syx:A03> [...]\n\
-             [--copy <dump.syx:A03:C04>] [--vacate A03] [--edits-out <edits.syx>] [--report <report.txt>]\n\
+             [--copy <dump.syx:A03:C04>] [--vacate A03]\n\
+             [--copy-kit <dump.syx:A03:C04>] [--vacate-kit A03]\n\
+             [--edits-out <edits.syx>] [--report <report.txt>]\n\
              Dest C04 leaves A01 empty. PATH:PATTERN still auto-packs first empty slot.\n\
              --vacate empties a dest pattern (move away / differential). PAT+KIT copy only.\n\
+             --copy-kit overwrites dest kit C04 (A01–H16 = kit 0–127). No pattern write.\n\
+             Occupied dest kits are overwritten so patterns already using that kit pick up\n\
+             the new analog/samples. --vacate-kit empties a dest kit object.\n\
              --out writes a whole-project .syx (restore into empty/disposable RAM).\n\
              --edits-out writes settings + changed kits/patterns only (restore onto dest-base in RAM).\n\
              This tool never talks USB/MIDI.\n"
@@ -82,11 +88,20 @@ fn run() -> Result<(), String> {
             let report = take_flag(&mut args, "--report");
             let copies = take_all(&mut args, "--copy");
             let vacates = take_all(&mut args, "--vacate");
+            let kit_copies = take_all(&mut args, "--copy-kit");
+            let kit_vacates = take_all(&mut args, "--vacate-kit");
             if !args.is_empty() {
                 return Err(format!("unexpected args: {args:?}"));
             }
-            if copies.is_empty() && vacates.is_empty() {
-                return Err("compose needs at least one --copy PATH:PATTERN or --vacate SLOT".into());
+            if copies.is_empty()
+                && vacates.is_empty()
+                && kit_copies.is_empty()
+                && kit_vacates.is_empty()
+            {
+                return Err(
+                    "compose needs at least one --copy, --vacate, --copy-kit, or --vacate-kit"
+                        .into(),
+                );
             }
             if out.is_none() && edits_out.is_none() {
                 return Err("compose needs --out and/or --edits-out".into());
@@ -117,8 +132,15 @@ fn run() -> Result<(), String> {
                 .iter()
                 .map(|c| parse_copy_spec(c))
                 .collect::<Result<_, _>>()?;
+            let kit_specs: Vec<_> = kit_copies
+                .iter()
+                .map(|c| parse_copy_spec(c))
+                .collect::<Result<_, _>>()?;
             let mut watched: Vec<PathBuf> = vec![template.clone()];
             for spec in &specs {
+                watched.push(PathBuf::from(&spec.src_path));
+            }
+            for spec in &kit_specs {
                 watched.push(PathBuf::from(&spec.src_path));
             }
             let before = snapshot_files(&watched)?;
@@ -131,11 +153,23 @@ fn run() -> Result<(), String> {
                 vacate_pattern(&mut dest, idx)?;
                 vacated.push(idx);
             }
+            let mut vacated_kits = Vec::new();
+            for v in &kit_vacates {
+                let idx = parse_pattern_index(v)?;
+                vacate_kit(&mut dest, idx)?;
+                vacated_kits.push(idx);
+            }
             let mut reports = Vec::new();
             for spec in &specs {
                 let src = load_project(Path::new(&spec.src_path))?;
                 let r = copy_pattern_kit(&src, &mut dest, spec.pattern, spec.dest)?;
                 reports.push(r);
+            }
+            let mut kit_reports = Vec::new();
+            for spec in &kit_specs {
+                let src = load_project(Path::new(&spec.src_path))?;
+                let r = copy_kit(&src, &mut dest, spec.pattern, spec.dest)?;
+                kit_reports.push(r);
             }
             let mut out_label = String::from("(none)");
             let mut check_opt = None;
@@ -169,6 +203,8 @@ fn run() -> Result<(), String> {
                 &out_label,
                 &reports,
                 &vacated,
+                &kit_reports,
+                &vacated_kits,
                 check_ref,
                 sources_unchanged,
                 sample_slots_used(&dest),

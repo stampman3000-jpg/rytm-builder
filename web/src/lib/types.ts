@@ -49,4 +49,15 @@ export type DestPiece = {
   originIndex: number;
 };
 
+/** Kit dest-grid occupant. Same A01–H16 labels as kit indices 0–127. */
+export type DestKitPiece = {
+  id: string;
+  origin: "base" | "library";
+  dumpPath: string;
+  dumpName: string;
+  kit: KitRow;
+  destIndex: number;
+  originIndex: number;
+};
+
 export const DEST_BASE_PATH = "@dest";
