@@ -10,6 +10,11 @@ Firmware target: **AR 1.70 / v5** object sizes (same as Johnny’s MK1 dumps).
 
 This branch (`cursor/rytm-mac-app-0afb`) is the working **universal Mac** wrap (Intel + Apple Silicon).
 
+```bash
+git clone -b cursor/rytm-mac-app-0afb https://github.com/stampman3000-jpg/rytm-builder.git
+cd rytm-builder
+```
+
 **Already-built `.app`:** double-click to open. The first time, **right-click the app → Open** and confirm. It is unsigned, so a normal double-click can be blocked by Gatekeeper.
 
 **Build from this repo** (Node + Rust). Compose runs in-process; the window is a webview, not a hidden Next server.
