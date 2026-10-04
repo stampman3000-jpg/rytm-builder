@@ -2,7 +2,7 @@
 name = "rytm-builder-app"
 version = "0.1.0"
 description = "Analog Rytm fresh project builder"
-authors = ["Johnny"]
+authors = ["Stampman3000"]
 edition = "2021"
 license = "MIT"
 

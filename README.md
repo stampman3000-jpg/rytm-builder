@@ -4,7 +4,7 @@ Compose and stage Analog Rytm pattern and kit changes from a library of dumps, t
 
 Samples must already live on the Rytm +Drive. The builder only copies 16-byte fingerprints so restored kits bind to those files. There is no USB/MIDI send.
 
-Firmware target: **AR 1.70 / v5** object sizes (same as Johnny’s MK1 dumps).
+Firmware target: **AR 1.70 / v5** object sizes (same as Stampman3000’s MK1 dumps).
 
 ## Mac app (double-click)
 
