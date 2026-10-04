@@ -8,7 +8,11 @@ Firmware target: **AR 1.70 / v5** object sizes (same as Johnny’s MK1 dumps).
 
 ## Mac app (double-click)
 
-Unsigned `.app` (right-click → Open the first time). Compose runs in-process; the window is a webview, not a hidden Next server.
+This branch (`cursor/rytm-mac-app-0afb`) is the working **universal Mac** wrap (Intel + Apple Silicon).
+
+**Already-built `.app`:** double-click to open. The first time, **right-click the app → Open** and confirm. It is unsigned, so a normal double-click can be blocked by Gatekeeper.
+
+**Build from this repo** (Node + Rust). Compose runs in-process; the window is a webview, not a hidden Next server.
 
 ```bash
 cd web && npm install && cd ..
