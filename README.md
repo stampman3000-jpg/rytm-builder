@@ -2,6 +2,8 @@
 
 Compose and stage Analog Rytm pattern and kit changes from a library of dumps, then export a fresh whole-project or differential `.syx`. Source files stay read-only; the working destination is changed only in memory, and every run writes a new file.
 
+The repo is a Rust CLI, a local Vite + React UI in `web/`, and a Tauri Mac app in `src-tauri/`. Agent notes are in [AGENTS.md](AGENTS.md).
+
 Samples must already live on the Rytm +Drive. The builder only copies 16-byte fingerprints so restored kits bind to those files. There is no USB/MIDI send.
 
 Firmware target: **AR 1.70 / v5** object sizes (same as Stampman3000’s MK1 dumps).
@@ -38,6 +40,8 @@ cd web && npm install && cd ..
 npm --prefix web run desktop
 ```
 
+UI only (no compose): `npm --prefix web run dev` on http://127.0.0.1:1420. See `web/README.md`.
+
 ## CLI
 
 Needs Rust 1.83 (or similar; not edition 2024). From this directory:
@@ -46,7 +50,7 @@ Needs Rust 1.83 (or similar; not edition 2024). From this directory:
 cargo build
 ```
 
-The binary is `target/debug/rytm-builder`.
+The binary is `target/debug/rytm-builder`. `cargo test` runs the unit tests in `src/`.
 
 Keep personal `.syx` dumps out of git (they are gitignored). Point the CLI at a local dumps folder.
 
